@@ -1,6 +1,7 @@
 import Foundation
 import CoreLocation
 import Combine
+import UIKit
 
 /// Orchestrates a live recording pass: pulls GPS fixes, reads the radio type,
 /// runs periodic throughput probes, and accumulates samples.
@@ -30,6 +31,9 @@ final class RecordingEngine: ObservableObject {
     private var lastResultAt: Date?
     private var throughputRunning = false
     private var gridKeys = Set<String>()
+    private var locationSubscription: AnyCancellable?
+    private var lastSampleDate = Date.distantPast
+    private var lastThroughputDate = Date.distantPast
 
     private let sampleInterval = 3      // seconds between GPS samples
     private let throughputInterval = 20 // seconds between speed probes
@@ -47,16 +51,25 @@ final class RecordingEngine: ObservableObject {
         location.requestPermission()
         location.startUpdating()
         currentRat = radio.refresh()
+        UIApplication.shared.isIdleTimerDisabled = true
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // Drive sampling from location updates so recording continues with screen off.
+        locationSubscription = location.$location
+            .compactMap { $0 }
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.backgroundSampleIfNeeded() }
+            }
         if throughputEnabled { runThroughput() }
     }
 
     /// Stops recording and returns the finished pass (nil if nothing was captured).
     func stop() -> Pass? {
         timer?.invalidate(); timer = nil
+        locationSubscription?.cancel(); locationSubscription = nil
         location.stopUpdating()
+        UIApplication.shared.isIdleTimerDisabled = false
         isRecording = false
         guard !samples.isEmpty else { return nil }
         return Pass(carrier: carrier,
@@ -75,15 +88,40 @@ final class RecordingEngine: ObservableObject {
         lastResult = nil
         lastResultAt = nil
         lastSampleLocation = nil
+        lastSampleDate = .distantPast
+        lastThroughputDate = .distantPast
         gridKeys.removeAll()
     }
 
     // MARK: - Timer
 
     private func tick() {
-        elapsed += 1
-        if elapsed % sampleInterval == 0 { captureSample() }
-        if throughputEnabled, elapsed % throughputInterval == 0 { runThroughput() }
+        // Derive elapsed from wall time so it stays accurate after background gaps.
+        elapsed = Int(Date().timeIntervalSince(startedAt))
+        let now = Date()
+        if now.timeIntervalSince(lastSampleDate) >= Double(sampleInterval) {
+            lastSampleDate = now
+            captureSample()
+        }
+        if throughputEnabled, now.timeIntervalSince(lastThroughputDate) >= Double(throughputInterval) {
+            lastThroughputDate = now
+            runThroughput()
+        }
+    }
+
+    /// Called on each location update while in the background (timer doesn't fire then).
+    private func backgroundSampleIfNeeded() {
+        guard isRecording, UIApplication.shared.applicationState == .background else { return }
+        let now = Date()
+        elapsed = Int(now.timeIntervalSince(startedAt))
+        if now.timeIntervalSince(lastSampleDate) >= Double(sampleInterval) {
+            lastSampleDate = now
+            captureSample()
+        }
+        if throughputEnabled, now.timeIntervalSince(lastThroughputDate) >= Double(throughputInterval) {
+            lastThroughputDate = now
+            runThroughput()
+        }
     }
 
     private func captureSample() {
