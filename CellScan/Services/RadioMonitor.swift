@@ -11,9 +11,9 @@ final class RadioMonitor: ObservableObject {
 
     init() {
         refresh()
-        networkInfo.serviceCurrentRadioAccessTechnologyDidUpdateNotifier = { [weak self] (_: String) in
-            DispatchQueue.main.async { self?.refresh() }
-        }
+        // CoreTelephony has no push notifier for radio-access-technology changes,
+        // so the value is refreshed by polling — the recording engine calls
+        // refresh() on every captured sample.
     }
 
     /// Returns the freshest radio bucket, also updating the published value.
