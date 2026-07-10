@@ -4,9 +4,8 @@ struct SummaryView: View {
     @EnvironmentObject var settingsStore: SettingsStore
     var pass: Pass
     var onViewMap: () -> Void
+    var onExport: () -> Void
     var onDone: () -> Void
-
-    @State private var showingExport = false
 
     private var cells: [Cell] {
         pass.mergedCells(gridMeters: settingsStore.settings.cellMergeMeters,
@@ -39,10 +38,6 @@ struct SummaryView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showingExport) {
-            ExportView(pass: pass)
-                .presentationDetents([.medium, .large])
-        }
     }
 
     private var completeHeader: some View {
@@ -132,9 +127,7 @@ struct SummaryView: View {
     private var actions: some View {
         VStack(spacing: 10) {
             BigButton(title: "View Map", kind: .primary, systemIcon: "map", action: onViewMap)
-            BigButton(title: "Export CSV", kind: .secondary, systemIcon: "square.and.arrow.up") {
-                showingExport = true
-            }
+            BigButton(title: "Export CSV", kind: .secondary, systemIcon: "square.and.arrow.up", action: onExport)
             Button("Done", action: onDone)
                 .font(.system(size: 15))
                 .foregroundStyle(Color(hex: 0x8A929B))

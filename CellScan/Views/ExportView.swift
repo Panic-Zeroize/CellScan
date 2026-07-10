@@ -34,10 +34,17 @@ struct ExportView: View {
         ZStack {
             Theme.bgElevated.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                Capsule().fill(Color.white.opacity(0.2)).frame(width: 38, height: 5)
-                    .frame(maxWidth: .infinity).padding(.top, 10).padding(.bottom, 16)
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.textBright)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 8).padding(.bottom, 8)
 
-                Text("Export CSV").font(.system(size: 20, weight: .bold))
+                Text("Export CSV").font(.system(size: 28, weight: .bold))
 
                 fileRow.padding(.top, 15)
                 preview.padding(.top, 13)
@@ -61,6 +68,7 @@ struct ExportView: View {
                       defaultFilename: baseFilename) { result in
             if case .success = result { saved = true }
         }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var fileRow: some View {

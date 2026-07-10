@@ -5,6 +5,7 @@ enum Route: Hashable {
     case summary(UUID)
     case map(UUID)
     case combined([UUID])
+    case export(UUID)
     case settings
 }
 
@@ -41,6 +42,7 @@ struct RootView: View {
                         SummaryView(
                             pass: pass,
                             onViewMap: { path.append(.map(id)) },
+                            onExport: { path.append(.export(id)) },
                             onDone: { path.removeAll() }
                         )
                     } else { missing }
@@ -53,6 +55,9 @@ struct RootView: View {
                     let passes = ids.compactMap { store.pass(with: $0) }
                     if passes.isEmpty { missing }
                     else { MapScreen(passes: passes, title: "Combined · \(passes.count) scans") }
+                case .export(let id):
+                    if let pass = store.pass(with: id) { ExportView(pass: pass) }
+                    else { missing }
                 case .settings:
                     SettingsView()
                 }
