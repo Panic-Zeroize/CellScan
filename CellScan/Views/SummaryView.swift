@@ -1,13 +1,18 @@
 import SwiftUI
 
 struct SummaryView: View {
+    @EnvironmentObject var settingsStore: SettingsStore
     var pass: Pass
     var onViewMap: () -> Void
     var onDone: () -> Void
 
     @State private var showingExport = false
 
-    private var cells: [Cell] { pass.cells }
+    private var cells: [Cell] {
+        pass.mergedCells(gridMeters: settingsStore.settings.cellMergeMeters,
+                         average: settingsStore.settings.averageCells)
+    }
+    private var deadCount: Int { cells.filter { $0.rat == .none }.count }
 
     var body: some View {
         ZStack {
@@ -25,7 +30,7 @@ struct SummaryView: View {
                     CoverageBar(segments: segments.map { ($0.rat.color, $0.fraction) }, height: 11)
                     breakdownRows.padding(.top, 13)
 
-                    if pass.deadZoneCount > 0 { deadZoneBanner.padding(.top, 13) }
+                    if deadCount > 0 { deadZoneBanner.padding(.top, 13) }
 
                     actions.padding(.top, 22)
                 }
@@ -54,7 +59,7 @@ struct SummaryView: View {
                 .padding(.top, 13)
             HStack(spacing: 7) {
                 Circle().fill(pass.carrier.color).frame(width: 8, height: 8)
-                Text("\(pass.carrier.displayName) · \(RelativeDate.string(pass.startedAt)) · \(pass.durationString) · \(String(format: "%.1f mi", pass.distanceMiles))")
+                Text("\(pass.carrier.displayName) · \(RelativeDate.string(pass.startedAt)) · \(pass.durationString) · \(settingsStore.settings.distanceString(miles: pass.distanceMiles))")
             }
             .font(.system(size: 13.5))
             .foregroundStyle(Theme.textDim)
@@ -108,10 +113,10 @@ struct SummaryView: View {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(Theme.dangerSoft)
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(pass.deadZoneCount) dead zone\(pass.deadZoneCount == 1 ? "" : "s") found")
+                Text("\(deadCount) dead zone\(deadCount == 1 ? "" : "s") found")
                     .font(.system(size: 14.5, weight: .semibold))
                     .foregroundStyle(Color(hex: 0xF4A0A8))
-                Text("No service recorded at \(pass.deadZoneCount) location\(pass.deadZoneCount == 1 ? "" : "s") along the route")
+                Text("No service recorded at \(deadCount) location\(deadCount == 1 ? "" : "s") along the route")
                     .font(.system(size: 12))
                     .foregroundStyle(Color(hex: 0x9AA3AD))
             }

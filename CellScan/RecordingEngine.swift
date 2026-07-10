@@ -12,7 +12,8 @@ final class RecordingEngine: ObservableObject {
     @Published var elapsed = 0
     @Published var samples: [Sample] = []
     @Published var currentRat: RAT = .none
-    @Published var sparks: [RAT] = []
+    /// Recent per-sample download measurements, for the speed-colored sparkline.
+    @Published var sparks: [Double?] = []
     @Published private(set) var distanceMeters: Double = 0
     @Published private(set) var cellCount = 0
     @Published var lastResult: ThroughputResult?
@@ -35,16 +36,21 @@ final class RecordingEngine: ObservableObject {
     private var lastSampleDate = Date.distantPast
     private var lastThroughputDate = Date.distantPast
 
-    private let sampleInterval = 3      // seconds between GPS samples
-    private let throughputInterval = 20 // seconds between speed probes
+    /// Snapshot of settings taken at the start of a pass.
+    private var settings = AppSettings.default
+
+    private var sampleInterval: Int { max(1, settings.sampleIntervalSec) }
+    private var throughputInterval: Int { settings.throughputIntervalSec }
+    private var throughputActive: Bool { throughputEnabled && throughputInterval > 0 }
 
     // MARK: - Control
 
     func requestPermission() { location.requestPermission() }
 
-    func start(carrier: Carrier, throughputEnabled: Bool) {
+    func start(carrier: Carrier, throughputEnabled: Bool, settings: AppSettings) {
         self.carrier = carrier
         self.throughputEnabled = throughputEnabled
+        self.settings = settings
         reset()
         isRecording = true
         startedAt = Date()
@@ -61,7 +67,7 @@ final class RecordingEngine: ObservableObject {
             .sink { [weak self] _ in
                 Task { @MainActor in self?.backgroundSampleIfNeeded() }
             }
-        if throughputEnabled { runThroughput() }
+        if throughputActive { runThroughput() }
     }
 
     /// Stops recording and returns the finished pass (nil if nothing was captured).
@@ -93,20 +99,12 @@ final class RecordingEngine: ObservableObject {
         gridKeys.removeAll()
     }
 
-    // MARK: - Timer
+    // MARK: - Sampling cadence
 
     private func tick() {
         // Derive elapsed from wall time so it stays accurate after background gaps.
         elapsed = Int(Date().timeIntervalSince(startedAt))
-        let now = Date()
-        if now.timeIntervalSince(lastSampleDate) >= Double(sampleInterval) {
-            lastSampleDate = now
-            captureSample()
-        }
-        if throughputEnabled, now.timeIntervalSince(lastThroughputDate) >= Double(throughputInterval) {
-            lastThroughputDate = now
-            runThroughput()
-        }
+        sampleIfDue(Date())
     }
 
     /// Called on each location update while in the background (timer doesn't fire then).
@@ -114,11 +112,15 @@ final class RecordingEngine: ObservableObject {
         guard isRecording, UIApplication.shared.applicationState == .background else { return }
         let now = Date()
         elapsed = Int(now.timeIntervalSince(startedAt))
+        sampleIfDue(now)
+    }
+
+    private func sampleIfDue(_ now: Date) {
         if now.timeIntervalSince(lastSampleDate) >= Double(sampleInterval) {
             lastSampleDate = now
             captureSample()
         }
-        if throughputEnabled, now.timeIntervalSince(lastThroughputDate) >= Double(throughputInterval) {
+        if throughputActive, now.timeIntervalSince(lastThroughputDate) >= Double(throughputInterval) {
             lastThroughputDate = now
             runThroughput()
         }
@@ -127,6 +129,12 @@ final class RecordingEngine: ObservableObject {
     private func captureSample() {
         currentRat = radio.refresh()
         guard let loc = location.location else { return }
+
+        // Distance-interval gating: skip if we haven't moved far enough yet.
+        if settings.minSampleDistanceM > 0, let prev = lastSampleLocation,
+           loc.distance(from: prev) < settings.minSampleDistanceM {
+            return
+        }
 
         // Attach the most recent throughput result if it's still fresh.
         var down: Double?, up: Double?, latency: Double?
@@ -150,12 +158,13 @@ final class RecordingEngine: ObservableObject {
                             latencyMs: latency)
         samples.append(sample)
 
-        // Sparkline history
-        sparks.append(currentRat)
+        // Sparkline history — now driven by measured download speed.
+        sparks.append(down)
         if sparks.count > 26 { sparks.removeFirst(sparks.count - 26) }
 
-        // Dedup cell count on a ~120 m grid (matches Pass.cells)
-        let key = "\(Int(sample.lat * 900))_\(Int(sample.lng * 900))"
+        // Dedup cell count on the same grid as Pass.mergedCells.
+        let cellDeg = max(settings.cellMergeMeters, 10) / 111_000.0
+        let key = "\(Int((sample.lat / cellDeg).rounded(.down)))_\(Int((sample.lng / cellDeg).rounded(.down)))"
         gridKeys.insert(key)
         cellCount = gridKeys.count
 
@@ -204,8 +213,8 @@ final class RecordingEngine: ObservableObject {
         location.location.map { String(format: "±%.0f m", max(0, $0.horizontalAccuracy)) } ?? "—"
     }
     var speedString: String {
-        guard let s = location.location?.speed, s >= 0 else { return "0 mph" }
-        return String(format: "%.0f mph", s * 2.2369362920544)
+        guard let s = location.location?.speed, s >= 0 else { return settings.speedString(mph: 0) }
+        return settings.speedString(mph: s * 2.2369362920544)
     }
     var latencyString: String {
         guard let l = lastResult?.latencyMs else { return currentRat == .none ? "timeout" : "—" }

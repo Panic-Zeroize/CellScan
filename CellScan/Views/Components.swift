@@ -25,20 +25,35 @@ struct StatTile: View {
     }
 }
 
-/// Live RAT sparkline — bar height encodes signal tier.
+/// Live throughput sparkline — bar color + height encode measured download speed.
+/// Samples with no measurement yet render as a short neutral bar.
 struct Sparkline: View {
-    var rats: [RAT]
+    var downloads: [Double?]
+
+    private let neutral = Color(hex: 0x3A4048)
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 3) {
-            ForEach(Array(rats.enumerated()), id: \.offset) { _, r in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(r.color)
-                    .frame(width: 5, height: max(4, CGFloat(r.tier + 1) / 5 * 34))
-                    .shadow(color: r.color.opacity(0.5), radius: 3)
+            ForEach(Array(downloads.enumerated()), id: \.offset) { _, d in
+                bar(for: d)
             }
         }
         .frame(height: 34, alignment: .bottom)
-        .animation(.easeOut(duration: 0.2), value: rats.count)
+        .animation(.easeOut(duration: 0.2), value: downloads.count)
+    }
+
+    @ViewBuilder private func bar(for down: Double?) -> some View {
+        if let down {
+            let tier = CoverageTier.from(downMbps: down)
+            RoundedRectangle(cornerRadius: 2)
+                .fill(tier.color)
+                .frame(width: 5, height: max(4, CGFloat(tier.rank + 1) / 5 * 34))
+                .shadow(color: tier.color.opacity(0.5), radius: 3)
+        } else {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(neutral)
+                .frame(width: 5, height: 5)
+        }
     }
 }
 

@@ -2,20 +2,42 @@ import SwiftUI
 import MapKit
 
 struct MapScreen: View {
-    var pass: Pass
+    var passes: [Pass]
+    var title: String
+    @EnvironmentObject var settingsStore: SettingsStore
     @Environment(\.dismiss) private var dismiss
 
     enum Mode { case rat, throughput }
-    @State private var mode: Mode = .throughput   // per user's choice: color by real speed
+    @State private var mode: Mode = .throughput   // color by real speed by default
     @State private var selected: Cell?
     @State private var position: MapCameraPosition
+    @State private var enabledLayers: Set<Carrier>
 
-    private let cells: [Cell]
+    init(passes: [Pass], title: String) {
+        self.passes = passes
+        self.title = title
+        _position = State(initialValue: .region(Self.region(for: passes)))
+        _enabledLayers = State(initialValue: Set(passes.map { $0.carrier }))
+    }
 
-    init(pass: Pass) {
-        self.pass = pass
-        self.cells = pass.cells
-        _position = State(initialValue: .region(Self.region(for: pass.cells)))
+    // MARK: - Derived data
+
+    private var groups: [(carrier: Carrier, cells: [Cell])] {
+        passes.map { p in
+            (carrier: p.carrier,
+             cells: p.mergedCells(gridMeters: settingsStore.settings.cellMergeMeters,
+                                  average: settingsStore.settings.averageCells))
+        }
+    }
+    private var visibleGroups: [(carrier: Carrier, cells: [Cell])] {
+        groups.filter { enabledLayers.contains($0.carrier) }
+    }
+    private var cells: [Cell] { visibleGroups.flatMap { $0.cells } }
+
+    private var carriers: [Carrier] {
+        var seen: [Carrier] = []
+        for p in passes where !seen.contains(p.carrier) { seen.append(p.carrier) }
+        return seen
     }
 
     var body: some View {
@@ -24,6 +46,7 @@ struct MapScreen: View {
             mapLayer
             topOverlay
             modeSwitch
+            layerChips
             legend
             if let sel = selected { detailSheet(sel) }
         }
@@ -34,9 +57,11 @@ struct MapScreen: View {
 
     private var mapLayer: some View {
         Map(position: $position) {
-            if cells.count > 1 {
-                MapPolyline(coordinates: cells.map { $0.coordinate })
-                    .stroke(Theme.accent.opacity(0.5), lineWidth: 3)
+            ForEach(Array(visibleGroups.enumerated()), id: \.offset) { _, g in
+                if g.cells.count > 1 {
+                    MapPolyline(coordinates: g.cells.map { $0.coordinate })
+                        .stroke(g.carrier.color.opacity(0.45), lineWidth: 2.5)
+                }
             }
             ForEach(cells) { cell in
                 Annotation("", coordinate: cell.coordinate) {
@@ -70,7 +95,7 @@ struct MapScreen: View {
                 }
                 Spacer()
                 VStack(spacing: 1) {
-                    Text("\(pass.carrier.displayName) · \(RelativeDate.short(pass.startedAt))")
+                    Text(title)
                         .font(.system(size: 14, weight: .semibold))
                     Text("\(cells.count) cells · tap for detail")
                         .font(.system(size: 10.5)).foregroundStyle(Color(hex: 0x8A929B))
@@ -98,6 +123,43 @@ struct MapScreen: View {
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
             .padding(.top, 62)
+            Spacer()
+        }
+    }
+
+    /// One toggleable chip per carrier layer (matches the design's layer control).
+    private var layerChips: some View {
+        VStack {
+            HStack {
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    ForEach(carriers) { carrier in
+                        Button {
+                            if enabledLayers.contains(carrier) { enabledLayers.remove(carrier) }
+                            else { enabledLayers.insert(carrier) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Circle().fill(enabledLayers.contains(carrier) ? carrier.color : Color(hex: 0x3A4048))
+                                    .frame(width: 10, height: 10)
+                                Text(carrier.displayName).font(.system(size: 12.5))
+                                    .foregroundStyle(Color(hex: 0xD7DBDF))
+                                if enabledLayers.contains(carrier) {
+                                    Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(Theme.success)
+                                }
+                            }
+                            .padding(.vertical, 7).padding(.horizontal, 12)
+                            .background(glass)
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 112)
             Spacer()
         }
     }
@@ -140,6 +202,10 @@ struct MapScreen: View {
                 HStack {
                     SignalBadge(rat: cell.rat)
                     Spacer()
+                    HStack(spacing: 6) {
+                        Circle().fill(cell.carrier.color).frame(width: 8, height: 8)
+                        Text(cell.carrier.displayName).font(.system(size: 12)).foregroundStyle(Theme.textDim)
+                    }
                     Button { withAnimation { selected = nil } } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .bold))
@@ -156,7 +222,7 @@ struct MapScreen: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Theme.textDim)
                 .padding(.top, 11)
-                Text("Worst of \(cell.sampleCount) sample\(cell.sampleCount == 1 ? "" : "s") merged into this cell")
+                Text("\(settingsStore.settings.averageCells ? "Average" : "Worst") of \(cell.sampleCount) sample\(cell.sampleCount == 1 ? "" : "s") merged into this cell")
                     .font(.system(size: 11.5)).foregroundStyle(Theme.accent)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 5)
@@ -166,7 +232,7 @@ struct MapScreen: View {
                     detailTile("DOWN", cell.downMbps.map { String(format: "%.0f Mb", $0) } ?? "—")
                     detailTile("UP", cell.upMbps.map { String(format: "%.1f Mb", $0) } ?? "—")
                     detailTile("±ACC", String(format: "%.0f m", cell.accuracy))
-                    detailTile("SPEED", String(format: "%.0f mph", cell.speedMph))
+                    detailTile("SPEED", settingsStore.settings.speedString(mph: cell.speedMph))
                     detailTile("SAMPLES", "\(cell.sampleCount)")
                 }
                 .padding(.top, 14)
@@ -234,16 +300,17 @@ struct MapScreen: View {
         }
     }
 
-    private static func region(for cells: [Cell]) -> MKCoordinateRegion {
-        guard let first = cells.first else {
+    private static func region(for passes: [Pass]) -> MKCoordinateRegion {
+        let coords = passes.flatMap { $0.samples.map { ($0.lat, $0.lng) } }
+        guard let first = coords.first else {
             return MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
                 span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
         }
-        var minLat = first.lat, maxLat = first.lat, minLng = first.lng, maxLng = first.lng
-        for c in cells {
-            minLat = min(minLat, c.lat); maxLat = max(maxLat, c.lat)
-            minLng = min(minLng, c.lng); maxLng = max(maxLng, c.lng)
+        var minLat = first.0, maxLat = first.0, minLng = first.1, maxLng = first.1
+        for c in coords {
+            minLat = min(minLat, c.0); maxLat = max(maxLat, c.0)
+            minLng = min(minLng, c.1); maxLng = max(maxLng, c.1)
         }
         let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
                                             longitude: (minLng + maxLng) / 2)

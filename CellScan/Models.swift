@@ -57,6 +57,17 @@ enum RAT: String, Codable, CaseIterable {
 
     var label: String { self == .none ? "No service" : rawValue }
 
+    /// Nearest RAT bucket for an averaged tier value.
+    static func from(tier: Int) -> RAT {
+        switch max(0, min(4, tier)) {
+        case 4: return .fiveG
+        case 3: return .lte
+        case 2: return .threeG
+        case 1: return .twoG
+        default: return .none
+        }
+    }
+
     /// Map a CoreTelephony `CTRadioAccessTechnology*` constant to a bucket.
     static func from(techString tech: String?) -> RAT {
         guard let t = tech else { return .none }
@@ -91,6 +102,17 @@ enum CoverageTier: String, Codable {
         case .ok: return "5–30"
         case .poor: return "< 5"
         case .dead: return "No data"
+        }
+    }
+
+    /// Height rank for the recording sparkline (great = tallest).
+    var rank: Int {
+        switch self {
+        case .great: return 4
+        case .good: return 3
+        case .ok: return 2
+        case .poor: return 1
+        case .dead: return 0
         }
     }
 
@@ -132,8 +154,9 @@ struct Cell: Identifiable {
     var id = UUID()
     var lat: Double
     var lng: Double
-    var rat: RAT              // worst RAT seen in the bucket
-    var downMbps: Double?     // representative (worst non-nil) download
+    var carrier: Carrier      // which scan/layer this cell belongs to
+    var rat: RAT              // averaged (or worst) RAT in the bucket
+    var downMbps: Double?     // averaged (or worst) download
     var upMbps: Double?
     var latencyMs: Double?
     var accuracy: Double
@@ -159,49 +182,76 @@ struct Pass: Codable, Identifiable {
 
     // Derived --------------------------------------------------------------
 
-    /// Merge raw samples into coverage cells on a ~110 m grid, worst sample wins.
-    var cells: [Cell] {
+    /// Cells merged with the app defaults (average, ~120 m grid).
+    var cells: [Cell] { mergedCells() }
+
+    /// Merge raw samples into coverage cells on a grid. When `average` is true,
+    /// samples in the same location are averaged (RAT tier, download, up, latency);
+    /// otherwise the worst sample in the bucket wins.
+    func mergedCells(gridMeters: Double = 120, average: Bool = true) -> [Cell] {
         guard !samples.isEmpty else { return [] }
+        let cellDeg = max(gridMeters, 10) / 111_000.0
         struct Bucket {
-            var latSum = 0.0, lngSum = 0.0
-            var count = 0
+            var latSum = 0.0, lngSum = 0.0, count = 0
+            var ratTierSum = 0
             var worstRat = RAT.fiveG
-            var minDown: Double? = nil
-            var up: Double? = nil
-            var latency: Double? = nil
-            var accuracy = 0.0
-            var speed = 0.0
-            var time = Date()
+            var downSum = 0.0, downN = 0
+            var minDown: Double?
+            var upSum = 0.0, upN = 0
+            var latSumMs = 0.0, latN = 0
+            var accuracy = 0.0, speed = 0.0
+            var time = Date.distantPast
         }
         var buckets: [String: Bucket] = [:]
         for s in samples {
-            let key = "\(Int(s.lat * 900))_\(Int(s.lng * 900))" // ~120 m cells
+            let key = "\(Int((s.lat / cellDeg).rounded(.down)))_\(Int((s.lng / cellDeg).rounded(.down)))"
             var b = buckets[key] ?? Bucket()
             b.latSum += s.lat; b.lngSum += s.lng; b.count += 1
+            b.ratTierSum += s.rat.tier
             if s.rat.tier < b.worstRat.tier { b.worstRat = s.rat }
             if let d = s.downMbps {
+                b.downSum += d; b.downN += 1
                 b.minDown = b.minDown.map { Swift.min($0, d) } ?? d
             }
-            if let u = s.upMbps { b.up = u }
-            if let l = s.latencyMs { b.latency = l }
+            if let u = s.upMbps { b.upSum += u; b.upN += 1 }
+            if let l = s.latencyMs { b.latSumMs += l; b.latN += 1 }
             b.accuracy = s.accuracy
             b.speed = s.speedMph
-            b.time = s.t
+            if s.t > b.time { b.time = s.t }
             buckets[key] = b
         }
         return buckets.values.map { b in
-            Cell(lat: b.latSum / Double(b.count),
-                 lng: b.lngSum / Double(b.count),
-                 rat: b.worstRat,
-                 downMbps: b.minDown,
-                 upMbps: b.up,
-                 latencyMs: b.latency,
-                 accuracy: b.accuracy,
-                 speedMph: b.speed,
-                 sampleCount: b.count,
-                 time: b.time)
+            let rat: RAT = average
+                ? RAT.from(tier: Int((Double(b.ratTierSum) / Double(b.count)).rounded()))
+                : b.worstRat
+            let down: Double? = average
+                ? (b.downN > 0 ? b.downSum / Double(b.downN) : nil)
+                : b.minDown
+            let up: Double? = b.upN > 0 ? b.upSum / Double(b.upN) : nil
+            let latency: Double? = b.latN > 0 ? b.latSumMs / Double(b.latN) : nil
+            return Cell(lat: b.latSum / Double(b.count),
+                        lng: b.lngSum / Double(b.count),
+                        carrier: carrier,
+                        rat: rat,
+                        downMbps: down,
+                        upMbps: up,
+                        latencyMs: latency,
+                        accuracy: b.accuracy,
+                        speedMph: b.speed,
+                        sampleCount: b.count,
+                        time: b.time)
         }
         .sorted { $0.time < $1.time }
+    }
+
+    /// Combined CSV for several passes under one header.
+    static func combinedCSV(_ passes: [Pass]) -> String {
+        let header = "timestamp,lat,lng,acc,spd,hdg,carrier,rat,down_mbps,up_mbps,lat_ms\n"
+        return header + passes.map { p in
+            p.csvString().split(separator: "\n", omittingEmptySubsequences: false)
+                .dropFirst() // drop each pass's own header
+                .joined(separator: "\n")
+        }.joined(separator: "\n")
     }
 
     var deadZoneCount: Int { cells.filter { $0.rat == .none }.count }

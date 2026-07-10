@@ -4,6 +4,14 @@ struct HomeView: View {
     @EnvironmentObject var store: PassStore
     var onStartPass: () -> Void
     var onOpenPass: (UUID) -> Void
+    var onOpenSettings: () -> Void
+    var onCombine: ([UUID]) -> Void
+
+    @State private var selecting = false
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var showExport = false
+    @State private var exportURL: URL?
+    @State private var confirmDelete = false
 
     var body: some View {
         ZStack {
@@ -11,19 +19,15 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Passes")
-                            .font(.system(size: 33, weight: .bold))
-                        Text("\(store.recent.count) recorded · last 7 days")
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(Theme.textDim)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-
-                    startButton
+                    titleBlock
                         .padding(.horizontal, 20)
-                        .padding(.top, 14)
+                        .padding(.top, 16)
+
+                    if !selecting {
+                        startButton
+                            .padding(.horizontal, 20)
+                            .padding(.top, 14)
+                    }
 
                     Text("RECENT")
                         .sectionHeader()
@@ -35,14 +39,17 @@ struct HomeView: View {
                         emptyState
                     } else {
                         ForEach(store.recent) { pass in
-                            PassCard(pass: pass)
+                            PassCard(pass: pass, selecting: selecting,
+                                     selected: selectedIDs.contains(pass.id))
                                 .padding(.horizontal, 20)
                                 .padding(.bottom, 12)
-                                .onTapGesture { onOpenPass(pass.id) }
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        store.delete(pass)
-                                    } label: { Label("Delete Pass", systemImage: "trash") }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if selecting { toggle(pass.id) } else { onOpenPass(pass.id) }
+                                }
+                                .onLongPressGesture {
+                                    if !selecting { selecting = true }
+                                    toggle(pass.id)
                                 }
                         }
                     }
@@ -51,7 +58,20 @@ struct HomeView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .bottom) {
+            if selecting && !selectedIDs.isEmpty { actionBar }
+        }
+        .sheet(isPresented: $showExport) {
+            if let exportURL { ShareSheet(items: [exportURL]) }
+        }
+        .confirmationDialog("Delete \(selectedIDs.count) pass\(selectedIDs.count == 1 ? "" : "es")?",
+                            isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive, action: deleteSelected)
+            Button("Cancel", role: .cancel) {}
+        }
     }
+
+    // MARK: - Header
 
     private var header: some View {
         HStack {
@@ -63,9 +83,39 @@ struct HomeView: View {
                     .foregroundStyle(Theme.textBright)
             }
             Spacer()
+            if selecting {
+                Button("Done") { endSelecting() }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            } else {
+                HStack(spacing: 14) {
+                    Button(action: onOpenSettings) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Color(hex: 0x9AA3AD))
+                    }
+                    if !store.recent.isEmpty {
+                        Button("Select") { selecting = true }
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Passes")
+                .font(.system(size: 33, weight: .bold))
+            Text(selecting
+                 ? "\(selectedIDs.count) selected"
+                 : "\(store.recent.count) recorded · last 7 days")
+                .font(.system(size: 13.5))
+                .foregroundStyle(selecting ? Theme.accent : Theme.textDim)
+        }
     }
 
     private var startButton: some View {
@@ -100,6 +150,39 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Multi-select action bar
+
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            actionButton("Combine", "square.stack.3d.up", enabled: selectedIDs.count >= 2) {
+                onCombine(orderedSelection())
+                endSelecting()
+            }
+            actionButton("Export", "square.and.arrow.up", enabled: true, action: exportSelected)
+            actionButton("Delete", "trash", enabled: true, destructive: true) {
+                confirmDelete = true
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .overlay(Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1), alignment: .top)
+    }
+
+    private func actionButton(_ title: String, _ icon: String, enabled: Bool,
+                              destructive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 17))
+                Text(title).font(.system(size: 11, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(destructive ? Theme.dangerSoft : (enabled ? Theme.accent : Theme.textFaint))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "antenna.radiowaves.left.and.right")
@@ -116,6 +199,43 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
         .padding(.horizontal, 40)
+    }
+
+    // MARK: - Actions
+
+    private func toggle(_ id: UUID) {
+        if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }
+    }
+
+    private func endSelecting() {
+        selecting = false
+        selectedIDs = []
+    }
+
+    /// Selected passes in the order they appear (newest first).
+    private func selectedPasses() -> [Pass] {
+        store.recent.filter { selectedIDs.contains($0.id) }
+    }
+    private func orderedSelection() -> [UUID] {
+        selectedPasses().map { $0.id }
+    }
+
+    private func deleteSelected() {
+        for pass in selectedPasses() { store.delete(pass) }
+        endSelecting()
+    }
+
+    private func exportSelected() {
+        let passes = selectedPasses()
+        guard !passes.isEmpty else { return }
+        let csv = passes.count == 1 ? passes[0].csvString() : Pass.combinedCSV(passes)
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        let name = passes.count == 1 ? passes[0].csvFileName
+                                     : "cellscan_combined_\(df.string(from: Date())).csv"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try? csv.data(using: .utf8)?.write(to: url, options: [.atomic])
+        exportURL = url
+        showExport = true
     }
 }
 
@@ -141,9 +261,16 @@ struct LogoMark: View {
 
 /// A recent-pass summary card.
 struct PassCard: View {
+    @EnvironmentObject var settingsStore: SettingsStore
     var pass: Pass
+    var selecting: Bool = false
+    var selected: Bool = false
 
-    private var cells: [Cell] { pass.cells }
+    private var cells: [Cell] {
+        pass.mergedCells(gridMeters: settingsStore.settings.cellMergeMeters,
+                         average: settingsStore.settings.averageCells)
+    }
+    private var deadCount: Int { cells.filter { $0.rat == .none }.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -151,20 +278,30 @@ struct PassCard: View {
                 DotLabel(color: pass.carrier.color, text: pass.carrier.displayName, size: 9)
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text(RelativeDate.string(pass.startedAt))
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.textDim)
+                if selecting {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
+                } else {
+                    Text(RelativeDate.string(pass.startedAt))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.textDim)
+                }
             }
             HStack(spacing: 22) {
                 miniStat("TIME", pass.durationString)
-                miniStat("DIST", String(format: "%.1f mi", pass.distanceMiles))
+                miniStat("DIST", settingsStore.settings.distanceString(miles: pass.distanceMiles))
                 miniStat("CELLS", "\(cells.count)")
-                miniStat("DEAD", "\(pass.deadZoneCount)",
-                         color: pass.deadZoneCount > 0 ? Theme.dangerSoft : Theme.textBright)
+                miniStat("DEAD", "\(deadCount)",
+                         color: deadCount > 0 ? Theme.dangerSoft : Theme.textBright)
             }
             CoverageBar(segments: ratSegments, height: 7)
         }
         .card()
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Theme.accent, lineWidth: selected ? 2 : 0)
+        )
     }
 
     private func miniStat(_ label: String, _ value: String, color: Color = Theme.textBright) -> some View {

@@ -29,7 +29,7 @@ struct RecordingView: View {
                 SignalBadge(rat: engine.currentRat)
                     .padding(.top, 14)
 
-                Sparkline(rats: engine.sparks)
+                Sparkline(downloads: engine.sparks)
                     .padding(.top, 22)
                     .padding(.horizontal, 4)
 

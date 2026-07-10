@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NewPassView: View {
+    @EnvironmentObject var settingsStore: SettingsStore
     @ObservedObject var engine: RecordingEngine
     var onCancel: () -> Void
     var onStart: (Carrier, Bool) -> Void
@@ -38,6 +39,7 @@ struct NewPassView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             carrier = engine.carrier
+            throughputOn = settingsStore.settings.throughputDefaultOn
             engine.requestPermission()
         }
     }
