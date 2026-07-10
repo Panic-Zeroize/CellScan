@@ -5,12 +5,10 @@ struct HomeView: View {
     var onStartPass: () -> Void
     var onOpenPass: (UUID) -> Void
     var onOpenSettings: () -> Void
-    var onCombine: ([UUID]) -> Void
+    var onExport: ([UUID]) -> Void
 
     @State private var selecting = false
     @State private var selectedIDs: Set<UUID> = []
-    @State private var showExport = false
-    @State private var exportURL: URL?
     @State private var confirmDelete = false
 
     var body: some View {
@@ -60,9 +58,6 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if selecting && !selectedIDs.isEmpty { actionBar }
-        }
-        .sheet(isPresented: $showExport) {
-            if let exportURL { ShareSheet(items: [exportURL]) }
         }
         .confirmationDialog("Delete \(selectedIDs.count) pass\(selectedIDs.count == 1 ? "" : "es")?",
                             isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -154,11 +149,13 @@ struct HomeView: View {
 
     private var actionBar: some View {
         HStack(spacing: 10) {
-            actionButton("Combine", "square.stack.3d.up", enabled: selectedIDs.count >= 2) {
-                onCombine(orderedSelection())
+            actionButton("Combine", "square.stack.3d.up", enabled: selectedIDs.count >= 2,
+                         action: combineSelected)
+            actionButton("Export", "square.and.arrow.up", enabled: true) {
+                let ids = orderedSelection()
                 endSelecting()
+                onExport(ids)
             }
-            actionButton("Export", "square.and.arrow.up", enabled: true, action: exportSelected)
             actionButton("Delete", "trash", enabled: true, destructive: true) {
                 confirmDelete = true
             }
@@ -225,17 +222,16 @@ struct HomeView: View {
         endSelecting()
     }
 
-    private func exportSelected() {
+    /// Merge the selected passes into one new pass, delete the originals,
+    /// and open the merged pass's summary.
+    private func combineSelected() {
         let passes = selectedPasses()
-        guard !passes.isEmpty else { return }
-        let csv = passes.count == 1 ? passes[0].csvString() : Pass.combinedCSV(passes)
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-        let name = passes.count == 1 ? passes[0].csvFileName
-                                     : "cellscan_combined_\(df.string(from: Date())).csv"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        try? csv.data(using: .utf8)?.write(to: url, options: [.atomic])
-        exportURL = url
-        showExport = true
+        guard passes.count >= 2 else { return }
+        let merged = Pass.combining(passes)
+        store.add(merged)
+        passes.forEach { store.delete($0) }
+        endSelecting()
+        onOpenPass(merged.id)
     }
 }
 

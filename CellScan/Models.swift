@@ -241,6 +241,20 @@ struct Pass: Codable, Identifiable {
         }.joined(separator: "\n")
     }
 
+    /// Merge several passes into one new pass: all samples concatenated and
+    /// sorted by time, durations and distances summed. Carrier is kept if every
+    /// selected pass shares one, otherwise it becomes `.other`.
+    static func combining(_ passes: [Pass]) -> Pass {
+        let allSamples = passes.flatMap { $0.samples }.sorted { $0.t < $1.t }
+        let carriers = Set(passes.map { $0.carrier })
+        let carrier: Carrier = carriers.count == 1 ? (carriers.first ?? .other) : .other
+        return Pass(carrier: carrier,
+                    startedAt: passes.map { $0.startedAt }.min() ?? Date(),
+                    durationSec: passes.reduce(0) { $0 + $1.durationSec },
+                    distanceMiles: passes.reduce(0.0) { $0 + $1.distanceMiles },
+                    samples: allSamples)
+    }
+
     var durationString: String {
         let m = durationSec / 60, s = durationSec % 60
         return String(format: "%02d:%02d", m, s)

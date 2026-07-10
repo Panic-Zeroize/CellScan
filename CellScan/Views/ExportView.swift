@@ -19,16 +19,24 @@ struct CSVDocument: FileDocument {
 }
 
 struct ExportView: View {
-    var pass: Pass
+    var passes: [Pass]
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingSaver = false
     @State private var copied = false
     @State private var saved = false
 
-    private var csv: String { pass.csvString() }
+    private var isSingle: Bool { passes.count == 1 }
+    private var csv: String { isSingle ? passes[0].csvString() : Pass.combinedCSV(passes) }
     private var byteCount: Int { csv.utf8.count }
-    private var baseFilename: String { (pass.csvFileName as NSString).deletingPathExtension }
+    private var rowCount: Int { passes.reduce(0) { $0 + $1.samples.count } }
+
+    private var fileName: String {
+        if isSingle { return passes[0].csvFileName }
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        return "cellscan_combined_\(df.string(from: Date())).csv"
+    }
+    private var baseFilename: String { (fileName as NSString).deletingPathExtension }
 
     var body: some View {
         ZStack {
@@ -80,9 +88,9 @@ struct ExportView: View {
                                            startPoint: .top, endPoint: .bottom))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(pass.csvFileName)
+                Text(fileName)
                     .font(.system(size: 14.5, weight: .semibold, design: .monospaced))
-                Text("\(pass.samples.count) rows · 11 columns · \(sizeString) · UTF-8")
+                Text("\(rowCount) rows · 11 columns · \(sizeString) · UTF-8")
                     .font(.system(size: 12)).foregroundStyle(Theme.textDim)
             }
             Spacer()

@@ -4,8 +4,7 @@ enum Route: Hashable {
     case newPass
     case summary(UUID)
     case map(UUID)
-    case combined([UUID])
-    case export(UUID)
+    case export([UUID])
     case settings
 }
 
@@ -20,9 +19,9 @@ struct RootView: View {
         NavigationStack(path: $path) {
             HomeView(
                 onStartPass: { path.append(.newPass) },
-                onOpenPass: { path.append(.map($0)) },
+                onOpenPass: { path.append(.summary($0)) },
                 onOpenSettings: { path.append(.settings) },
-                onCombine: { path.append(.combined($0)) }
+                onExport: { path.append(.export($0)) }
             )
             .navigationDestination(for: Route.self) { route in
                 switch route {
@@ -42,7 +41,7 @@ struct RootView: View {
                         SummaryView(
                             pass: pass,
                             onViewMap: { path.append(.map(id)) },
-                            onExport: { path.append(.export(id)) },
+                            onExport: { path.append(.export([id])) },
                             onDone: { path.removeAll() }
                         )
                     } else { missing }
@@ -51,13 +50,10 @@ struct RootView: View {
                         MapScreen(passes: [pass],
                                   title: "\(pass.carrier.displayName) · \(RelativeDate.short(pass.startedAt))")
                     } else { missing }
-                case .combined(let ids):
+                case .export(let ids):
                     let passes = ids.compactMap { store.pass(with: $0) }
                     if passes.isEmpty { missing }
-                    else { MapScreen(passes: passes, title: "Combined · \(passes.count) scans") }
-                case .export(let id):
-                    if let pass = store.pass(with: id) { ExportView(pass: pass) }
-                    else { missing }
+                    else { ExportView(passes: passes) }
                 case .settings:
                     SettingsView()
                 }
