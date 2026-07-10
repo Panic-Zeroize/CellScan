@@ -11,7 +11,7 @@ final class RadioMonitor: ObservableObject {
 
     init() {
         refresh()
-        networkInfo.serviceCurrentRadioAccessTechnologyDidUpdateNotifier = { [weak self] _ in
+        networkInfo.serviceCurrentRadioAccessTechnologyDidUpdateNotifier = { [weak self] (_: String) in
             DispatchQueue.main.async { self?.refresh() }
         }
     }
