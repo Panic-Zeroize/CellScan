@@ -21,10 +21,13 @@ The original mock used hardcoded data. This app captures live data on device:
 | Download / upload / latency | ✅ Real | Periodic capped probe against Cloudflare's public speed endpoint |
 | Map + colored coverage cells | ✅ Real | `MapKit`, colored by measured throughput (or radio type) |
 | Saved passes (Home "Recent") | ✅ Real | Persisted to disk (JSON in the app's Documents dir) |
-| CSV export | ✅ Real | Native share sheet → Files, Mail, AirDrop, etc. |
+| CSV export | ✅ Real | **Save** writes a real `.csv` via the Files picker; **Copy** puts the table on the clipboard |
+| Combine multiple scans | ✅ Real | Home multi-select → one layered map (per-carrier layers) + a combined CSV share |
+| Tunable recording | ✅ Real | Settings screen: sample/speed-test intervals, min distance, cell merge radius, average vs worst-case, units |
 
-Everything stays on your device. The only network call is the optional speed test to
-`speed.cloudflare.com`.
+Coverage cells **average** co-located samples by default (RAT tier, download, up, latency);
+Worst-case is selectable in Settings. Everything stays on your device — the only network call
+is the optional speed test to `speed.cloudflare.com`.
 
 ---
 
@@ -42,8 +45,9 @@ file groups), and an iPhone on iOS 17+.
 3. Plug in your iPhone, select it as the run destination, and press **⌘R**.
 4. First launch on the phone: go to **Settings ▸ General ▸ VPN & Device Management**, tap your
    developer profile, and **Trust** it. Then reopen the app.
-5. Grant **location** permission when prompted (choose *While Using* — allow the follow-up
-   "Change to Always"/background prompt if you want it to keep recording with the screen off).
+5. Grant **location** permission when prompted (choose *While Using*). The app uses
+   When-In-Use location plus the `location` background mode, so it keeps recording with the
+   screen off during an active pass (the blue status bar shows while it does).
 
 > Free provisioning apps expire after **7 days** — just re-run from Xcode to refresh.
 
@@ -64,12 +68,20 @@ and set the deployment target to iOS 17.
 - **Stop & Save** → coverage summary (cells, dead zones, breakdown).
 - **View Map** to see your route with cells colored by real download speed (toggle to color
   by radio type). Tap any cell for its detail.
-- **Export CSV** to share the raw rows anywhere (ArcGIS-friendly columns).
+- **Export CSV** → **Save** (writes a `.csv` through the Files picker) or **Copy** (the whole
+  table to the clipboard). Columns are ArcGIS-friendly.
+- **Combine scans**: on Home, tap **Select** (or long-press a card), pick several passes, then
+  **Combine** (one map with per-carrier layer toggles), **Export** (a combined CSV via the
+  share sheet), or **Delete**.
+- **Settings** (gear icon, top-right of Home): sample interval, speed-test interval, minimum
+  distance per sample, cell merge radius, Average vs Worst-case merge, default speed-test state,
+  and Imperial/Metric units — each with its default labeled.
 
 ## Notes & knobs
 
-- Sample interval and throughput cadence live at the top of `RecordingEngine.swift`
-  (`sampleInterval`, `throughputInterval`), and the probe size is adaptive in `runThroughput()`.
+- Recording cadence (sample interval, speed-test interval, min distance, cell merge radius) is
+  set in the **Settings** screen and read as a snapshot at the start of each pass in
+  `RecordingEngine.start(...)`. The probe size is adaptive in `runThroughput()`.
 - The throughput test uses cellular data (roughly ~1–3 GB/hour at highway speeds with the test
   on). Turn it off in New Pass for a GPS-only, near-zero-data pass.
 - CSV columns: `timestamp,lat,lng,acc,spd,hdg,carrier,rat,down_mbps,up_mbps,lat_ms`.
@@ -82,12 +94,14 @@ CellScan/
   CellScanApp.swift          App entry
   Theme.swift                Colors + reusable card styles
   Models.swift               Carrier, RAT, CoverageTier, Sample, Cell, Pass (+CSV)
+  Settings.swift             AppSettings model + SettingsStore (persisted)
   PassStore.swift            On-disk persistence of passes
   RecordingEngine.swift      Orchestrates GPS + radio + throughput sampling
   Services/
     LocationManager.swift    CoreLocation wrapper (background updates)
     RadioMonitor.swift       CoreTelephony radio-type reader
     ThroughputTester.swift   Real download/upload/latency probe
-  Views/                     Home, NewPass, Recording, Summary, Map, Export, Components
+  Views/                     RootView, Home, NewPass, Recording, Summary, Map,
+                             Export, Settings, Components, ShareSheet
   Assets.xcassets            Accent color + app icon slot
 ```

@@ -23,8 +23,6 @@ enum Theme {
 
     // Hairline border used on cards
     static let hairline = Color.white.opacity(0.07)
-
-    static let mono = Font.system(.body, design: .monospaced)
 }
 
 extension Color {

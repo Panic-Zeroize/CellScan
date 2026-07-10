@@ -95,16 +95,6 @@ enum CoverageTier: String, Codable {
         }
     }
 
-    var legendLabel: String {
-        switch self {
-        case .great: return "> 120 Mbps"
-        case .good: return "30–120"
-        case .ok: return "5–30"
-        case .poor: return "< 5"
-        case .dead: return "No data"
-        }
-    }
-
     /// Height rank for the recording sparkline (great = tallest).
     var rank: Int {
         switch self {
@@ -182,9 +172,6 @@ struct Pass: Codable, Identifiable {
 
     // Derived --------------------------------------------------------------
 
-    /// Cells merged with the app defaults (average, ~120 m grid).
-    var cells: [Cell] { mergedCells() }
-
     /// Merge raw samples into coverage cells on a grid. When `average` is true,
     /// samples in the same location are averaged (RAT tier, download, up, latency);
     /// otherwise the worst sample in the bucket wins.
@@ -253,8 +240,6 @@ struct Pass: Codable, Identifiable {
                 .joined(separator: "\n")
         }.joined(separator: "\n")
     }
-
-    var deadZoneCount: Int { cells.filter { $0.rat == .none }.count }
 
     var durationString: String {
         let m = durationSec / 60, s = durationSec % 60

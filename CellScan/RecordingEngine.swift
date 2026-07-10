@@ -201,7 +201,6 @@ final class RecordingEngine: ObservableObject {
         let m = elapsed / 60, s = elapsed % 60
         return String(format: "%02d:%02d", m, s)
     }
-    var distanceMiles: Double { distanceMeters / 1609.344 }
 
     var lastLatString: String {
         location.location.map { String(format: "%.5f", $0.coordinate.latitude) } ?? "—"
@@ -219,9 +218,5 @@ final class RecordingEngine: ObservableObject {
     var latencyString: String {
         guard let l = lastResult?.latencyMs else { return currentRat == .none ? "timeout" : "—" }
         return String(format: "%.0f ms", l)
-    }
-    var downString: String {
-        guard let d = lastResult?.downMbps else { return "—" }
-        return String(format: "%.0f Mb", d)
     }
 }
