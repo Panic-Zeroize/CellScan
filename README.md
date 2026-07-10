@@ -1,0 +1,93 @@
+# CellScan
+
+A native iOS (SwiftUI) drive-test app that records **real** cellular coverage while you
+drive: GPS track, radio type (5G/LTE/3G), and a real throughput + latency probe — then
+shows a map, a coverage summary, and exports a CSV.
+
+Built from the CellScan design mock. This is a **working prototype** you can run on your
+own iPhone with a free Apple ID — no paid developer account required.
+
+---
+
+## What's real vs. what the design faked
+
+The original mock used hardcoded data. This app captures live data on device:
+
+| Capability | Status | Notes |
+|---|---|---|
+| GPS track (lat/lng, accuracy, speed, heading) | ✅ Real | `CoreLocation`, updates in background while recording |
+| Radio type (5G / LTE / 3G / 2G / none) | ✅ Real | `CoreTelephony` — the radio *type* is still readable natively |
+| Carrier **name** | ✍️ Manual tag | iOS deprecated carrier name; you tag the SIM per pass |
+| Download / upload / latency | ✅ Real | Periodic capped probe against Cloudflare's public speed endpoint |
+| Map + colored coverage cells | ✅ Real | `MapKit`, colored by measured throughput (or radio type) |
+| Saved passes (Home "Recent") | ✅ Real | Persisted to disk (JSON in the app's Documents dir) |
+| CSV export | ✅ Real | Native share sheet → Files, Mail, AirDrop, etc. |
+
+Everything stays on your device. The only network call is the optional speed test to
+`speed.cloudflare.com`.
+
+---
+
+## Build & run on your iPhone (free provisioning)
+
+**Requirements:** a Mac with **Xcode 16 or newer** (the project uses Xcode's synchronized
+file groups), and an iPhone on iOS 17+.
+
+1. Open **`CellScan.xcodeproj`** in Xcode.
+2. Select the **CellScan** target → **Signing & Capabilities**.
+   - Check **Automatically manage signing**.
+   - **Team:** pick your personal Apple ID (add it under Xcode ▸ Settings ▸ Accounts if needed).
+   - If the bundle id `com.cellscan.CellScan` is taken, change it to something unique like
+     `com.yourname.CellScan`.
+3. Plug in your iPhone, select it as the run destination, and press **⌘R**.
+4. First launch on the phone: go to **Settings ▸ General ▸ VPN & Device Management**, tap your
+   developer profile, and **Trust** it. Then reopen the app.
+5. Grant **location** permission when prompted (choose *While Using* — allow the follow-up
+   "Change to Always"/background prompt if you want it to keep recording with the screen off).
+
+> Free provisioning apps expire after **7 days** — just re-run from Xcode to refresh.
+
+### If your Xcode is older than 16
+Synchronized folder groups need Xcode 16+. Fallback (2 min): create a new **iOS App** project
+(SwiftUI, named `CellScan`), delete its starter files, then drag everything inside the
+`CellScan/` folder (all `.swift` files + `Assets.xcassets`) into it. Add these to the target's
+build settings / Info: `NSLocationWhenInUseUsageDescription`, `UIBackgroundModes = location`,
+and set the deployment target to iOS 17.
+
+---
+
+## Using it
+
+- **Start New Pass** → tag your carrier, toggle the throughput test, **Start Recording**.
+- Drive. The recording screen shows elapsed time, current radio type, a live signal
+  sparkline, sample/cell counts, last GPS fix, speed, and latency.
+- **Stop & Save** → coverage summary (cells, dead zones, breakdown).
+- **View Map** to see your route with cells colored by real download speed (toggle to color
+  by radio type). Tap any cell for its detail.
+- **Export CSV** to share the raw rows anywhere (ArcGIS-friendly columns).
+
+## Notes & knobs
+
+- Sample interval and throughput cadence live at the top of `RecordingEngine.swift`
+  (`sampleInterval`, `throughputInterval`), and the probe size is adaptive in `runThroughput()`.
+- The throughput test uses cellular data (roughly ~1–3 GB/hour at highway speeds with the test
+  on). Turn it off in New Pass for a GPS-only, near-zero-data pass.
+- CSV columns: `timestamp,lat,lng,acc,spd,hdg,carrier,rat,down_mbps,up_mbps,lat_ms`.
+
+## Project layout
+
+```
+CellScan.xcodeproj/          Xcode project (synchronized folder group)
+CellScan/
+  CellScanApp.swift          App entry
+  Theme.swift                Colors + reusable card styles
+  Models.swift               Carrier, RAT, CoverageTier, Sample, Cell, Pass (+CSV)
+  PassStore.swift            On-disk persistence of passes
+  RecordingEngine.swift      Orchestrates GPS + radio + throughput sampling
+  Services/
+    LocationManager.swift    CoreLocation wrapper (background updates)
+    RadioMonitor.swift       CoreTelephony radio-type reader
+    ThroughputTester.swift   Real download/upload/latency probe
+  Views/                     Home, NewPass, Recording, Summary, Map, Export, Components
+  Assets.xcassets            Accent color + app icon slot
+```
