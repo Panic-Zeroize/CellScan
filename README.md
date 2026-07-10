@@ -22,7 +22,7 @@ The original mock used hardcoded data. This app captures live data on device:
 | Map + colored coverage cells | ✅ Real | `MapKit`, colored by measured throughput (or radio type) |
 | Saved passes (Home "Recent") | ✅ Real | Persisted to disk (JSON in the app's Documents dir) |
 | CSV export | ✅ Real | **Save** writes a real `.csv` via the Files picker; **Copy** puts the table on the clipboard |
-| Combine multiple scans | ✅ Real | Home multi-select → one layered map (per-carrier layers) + a combined CSV share |
+| Combine multiple scans | ✅ Real | Home multi-select → merge into one new scan (originals deleted); also multi Export / Delete |
 | Tunable recording | ✅ Real | Settings screen: sample/speed-test intervals, min distance, cell merge radius, average vs worst-case, units |
 
 Coverage cells **average** co-located samples by default (RAT tier, download, up, latency);
@@ -70,9 +70,10 @@ and set the deployment target to iOS 17.
   by radio type). Tap any cell for its detail.
 - **Export CSV** → **Save** (writes a `.csv` through the Files picker) or **Copy** (the whole
   table to the clipboard). Columns are ArcGIS-friendly.
-- **Combine scans**: on Home, tap **Select** (or long-press a card), pick several passes, then
-  **Combine** (one map with per-carrier layer toggles), **Export** (a combined CSV via the
-  share sheet), or **Delete**.
+- Tapping a recent scan opens its **Summary** (View Map / Export CSV / Done).
+- **Select scans**: on Home, tap **Select** (or long-press a card), pick several passes, then
+  **Combine** (merges them into one new scan and deletes the originals), **Export** (Save/Copy
+  a combined CSV), or **Delete**.
 - **Settings** (gear icon, top-right of Home): sample interval, speed-test interval, minimum
   distance per sample, cell merge radius, Average vs Worst-case merge, default speed-test state,
   and Imperial/Metric units — each with its default labeled.
@@ -102,6 +103,6 @@ CellScan/
     RadioMonitor.swift       CoreTelephony radio-type reader
     ThroughputTester.swift   Real download/upload/latency probe
   Views/                     RootView, Home, NewPass, Recording, Summary, Map,
-                             Export, Settings, Components, ShareSheet
+                             Export, Settings, Components
   Assets.xcassets            Accent color + app icon slot
 ```
