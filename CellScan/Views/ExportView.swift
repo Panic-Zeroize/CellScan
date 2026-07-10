@@ -2,15 +2,33 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// A CSV file wrapper so `.fileExporter` can write a real .csv to Files.
+struct CSVDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText, .plainText] }
+    static var writableContentTypes: [UTType] { [.commaSeparatedText] }
+
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws {
+        let data = configuration.file.regularFileContents ?? Data()
+        text = String(decoding: data, as: UTF8.self)
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
+
 struct ExportView: View {
     var pass: Pass
     @Environment(\.dismiss) private var dismiss
 
-    @State private var fileURL: URL?
+    @State private var showingSaver = false
     @State private var copied = false
+    @State private var saved = false
 
     private var csv: String { pass.csvString() }
     private var byteCount: Int { csv.utf8.count }
+    private var baseFilename: String { (pass.csvFileName as NSString).deletingPathExtension }
 
     var body: some View {
         ZStack {
@@ -37,7 +55,12 @@ struct ExportView: View {
             }
             .padding(.horizontal, 20)
         }
-        .onAppear(perform: writeTempFile)
+        .fileExporter(isPresented: $showingSaver,
+                      document: CSVDocument(text: csv),
+                      contentType: .commaSeparatedText,
+                      defaultFilename: baseFilename) { result in
+            if case .success = result { saved = true }
+        }
     }
 
     private var fileRow: some View {
@@ -85,16 +108,22 @@ struct ExportView: View {
 
     private var actionRow: some View {
         HStack(spacing: 10) {
-            if let fileURL {
-                ShareLink(item: fileURL) {
-                    pillLabel("Share / Save", systemImage: "square.and.arrow.up", primary: true)
-                }
+            Button {
+                showingSaver = true
+            } label: {
+                pillLabel(saved ? "Saved" : "Save",
+                          systemImage: saved ? "checkmark" : "square.and.arrow.down",
+                          primary: true)
             }
+            .buttonStyle(.plain)
+
             Button {
                 UIPasteboard.general.string = csv
                 copied = true
             } label: {
-                pillLabel(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc", primary: false)
+                pillLabel(copied ? "Copied" : "Copy",
+                          systemImage: copied ? "checkmark" : "doc.on.doc",
+                          primary: false)
             }
             .buttonStyle(.plain)
         }
@@ -127,11 +156,5 @@ struct ExportView: View {
 
     private var sizeString: String {
         ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
-    }
-
-    private func writeTempFile() {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(pass.csvFileName)
-        try? csv.data(using: .utf8)?.write(to: url, options: [.atomic])
-        fileURL = url
     }
 }
