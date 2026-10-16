@@ -78,12 +78,12 @@ final class CellScanUITests: XCTestCase {
         tap(app.buttons["summary.export"])
         let copy = app.buttons["export.copy"]
         tap(copy)
-        waitUntil("Copy confirms", timeout: 5) { copy.label.contains("Copied") }
+        waitUntil("Copy confirms (label: \(copy.label))", timeout: 5) { copy.label == "Copied" }
 
         let save = app.buttons["export.save"]
         tap(save)
         confirmFilesPicker()
-        waitUntil("file saved through the Files picker", timeout: 15) { save.label.contains("Saved") }
+        waitUntil("file saved through the Files picker (label: \(save.label))", timeout: 15) { save.label == "Saved" }
         snapshot("exported")
 
         // Back to the summary, open the map, come back.
@@ -111,14 +111,14 @@ final class CellScanUITests: XCTestCase {
         element.tap()
     }
 
-    private func waitUntil(_ what: String, timeout: TimeInterval, _ condition: () -> Bool,
+    private func waitUntil(_ what: @autoclosure () -> String, timeout: TimeInterval, _ condition: () -> Bool,
                            file: StaticString = #filePath, line: UInt = #line) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return }
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
-        XCTFail("timed out waiting for: \(what)", file: file, line: line)
+        XCTFail("timed out waiting for: \(what())", file: file, line: line)
     }
 
     /// The location prompt is owned by SpringBoard, not the app.

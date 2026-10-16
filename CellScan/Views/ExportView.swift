@@ -168,6 +168,7 @@ struct ExportView: View {
                           primary: true)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(saved ? "Saved" : "Save")
             .accessibilityIdentifier("export.save")
 
             Button {
@@ -180,6 +181,7 @@ struct ExportView: View {
                           primary: false)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(copied ? "Copied" : "Copy")
             .accessibilityIdentifier("export.copy")
         }
     }
