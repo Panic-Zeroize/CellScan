@@ -132,6 +132,15 @@ struct PassArchive {
         try? FileManager.default.removeItem(at: checkpointURL)
     }
 
+    /// Removes the checkpoint only if it belongs to the given pass, so clearing a
+    /// stale recovered pass can never delete a newer, live recording's checkpoint.
+    func clearCheckpoint(ifPassID id: UUID) {
+        guard let data = try? Data(contentsOf: checkpointURL),
+              let pass = try? Self.makeDecoder().decode(Pass.self, from: data),
+              pass.id == id else { return }
+        clearCheckpoint()
+    }
+
     // MARK: - Helpers
 
     private func write(_ data: Data, to url: URL) throws {

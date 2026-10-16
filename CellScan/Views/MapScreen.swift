@@ -61,14 +61,18 @@ struct MapScreen: View {
 
     private func rebuildLayers() {
         let s = settingsStore.settings
+        let previousCarriers = Set(layers.map(\.carrier))
+        // Several passes are merged first so co-located samples share one cell
+        // (and one id) instead of producing duplicate cells per pass.
+        let source = passes.count == 1 ? passes[0] : Pass.combining(passes)
         var byCarrier: [Carrier: [Cell]] = [:]
         var order: [Carrier] = []
-        for pass in passes {
-            for cell in pass.mergedCells(gridMeters: s.cellMergeMeters, average: s.averageCells) {
-                if byCarrier[cell.carrier] == nil { order.append(cell.carrier) }
-                byCarrier[cell.carrier, default: []].append(cell)
-            }
+        for cell in source.mergedCells(gridMeters: s.cellMergeMeters, average: s.averageCells) {
+            if byCarrier[cell.carrier] == nil { order.append(cell.carrier) }
+            byCarrier[cell.carrier, default: []].append(cell)
         }
+        // Carriers that just appeared start visible.
+        enabledLayers.formUnion(Set(order).subtracting(previousCarriers))
         layers = order.map { carrier in
             let cells = (byCarrier[carrier] ?? []).sorted { $0.time < $1.time }
             var segments: [[CLLocationCoordinate2D]] = []

@@ -25,7 +25,7 @@ struct RootView: View {
     @State private var path: [Route] = []
     @State private var recording = false
     @State private var shownAlert: AppAlert?
-    @State private var pendingAlert: AppAlert?
+    @State private var alertQueue: [AppAlert] = []
 
     private var engine: RecordingEngine { holder.engine }
 
@@ -87,12 +87,8 @@ struct RootView: View {
         }
         .onAppear { takeStoreAlert() }                       // alerts raised during launch
         .onChange(of: store.alert) { _, _ in takeStoreAlert() }
-        .onChange(of: recording) { _, isRecording in
-            if !isRecording, let pending = pendingAlert {
-                pendingAlert = nil
-                present(pending)
-            }
-        }
+        .onChange(of: recording) { _, _ in showNextAlertIfIdle() }
+        .onChange(of: shownAlert) { _, _ in showNextAlertIfIdle() }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the foreground is the most likely moment to be killed.
             if phase != .active { engine.checkpointNow() }
@@ -108,13 +104,19 @@ struct RootView: View {
         present(alert)
     }
 
-    /// Alerts can't present over (or while dismissing) the recording cover, so
-    /// they wait until it is gone and the dismissal animation has finished.
+    /// Queues an alert. Alerts are shown one at a time, and never over (or while
+    /// dismissing) the recording cover.
     private func present(_ alert: AppAlert) {
-        if recording {
-            pendingAlert = alert
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { shownAlert = alert }
+        alertQueue.append(alert)
+        showNextAlertIfIdle()
+    }
+
+    private func showNextAlertIfIdle() {
+        guard !recording, shownAlert == nil, !alertQueue.isEmpty else { return }
+        // Let any cover / previous alert finish animating away first.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard !recording, shownAlert == nil, !alertQueue.isEmpty else { return }
+            shownAlert = alertQueue.removeFirst()
         }
     }
 

@@ -21,6 +21,9 @@ final class PassStore: ObservableObject {
     @Published var alert: AppAlert?
 
     private let archive: PassArchive
+    /// A recovered pass whose first save failed; its checkpoint is cleared after
+    /// the next successful save so it can't be resurrected later.
+    private var unsavedRecoveryID: UUID?
 
     init(archive: PassArchive = .standard) {
         self.archive = archive
@@ -28,7 +31,11 @@ final class PassStore: ObservableObject {
         passes = result.passes
 
         var messages: [String] = []
-        if let issue = result.issue { messages.append(issue) }
+        var title = "Recording recovered"
+        if let issue = result.issue {
+            messages.append(issue)
+            title = "Saved data issue"
+        }
 
         // A checkpoint only survives if the app died mid-recording.
         if let recovered = archive.takeCheckpoint(),
@@ -42,12 +49,13 @@ final class PassStore: ObservableObject {
                 messages.append("A recording that was interrupted (\(recovered.samples.count) samples, \(recovered.carrierLabel)) was recovered and saved.")
             } catch {
                 try? archive.writeCheckpoint(recovered)   // retry on next launch
-                messages.append("An interrupted recording was found but couldn’t be saved yet (\((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)). It will be retried next launch.")
+                unsavedRecoveryID = recovered.id
+                title = "Recording not saved yet"
+                messages.append("An interrupted recording was found but couldn’t be saved yet (\((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)). It will be retried automatically.")
             }
         }
         if !messages.isEmpty {
-            alert = AppAlert(title: result.issue == nil ? "Recording recovered" : "Saved data issue",
-                             message: messages.joined(separator: "\n\n"))
+            alert = AppAlert(title: title, message: messages.joined(separator: "\n\n"))
         }
     }
 
@@ -114,11 +122,17 @@ final class PassStore: ObservableObject {
     private func persist(clearingCheckpoint: Bool = false) {
         let snapshot = passes
         let archive = self.archive
+        let staleRecovery = unsavedRecoveryID
+        unsavedRecoveryID = nil
         Persistence.queue.async { [weak self] in
             do {
                 try archive.save(snapshot)
                 if clearingCheckpoint { archive.clearCheckpoint() }
+                if let id = staleRecovery { archive.clearCheckpoint(ifPassID: id) }
             } catch {
+                if let id = staleRecovery {
+                    DispatchQueue.main.async { self?.unsavedRecoveryID = self?.unsavedRecoveryID ?? id }
+                }
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 DispatchQueue.main.async {
                     self?.alert = AppAlert(title: "Couldn’t save", message: message)

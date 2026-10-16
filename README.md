@@ -107,7 +107,7 @@ The platform-independent core (`CellScan/Core`: model, cell merging, CSV export,
 crash-recovery) is a Swift package you can test without a simulator, on macOS or Linux:
 
 ```sh
-swift test                                   # 58 tests incl. 100k-sample stress cases
+swift test                                   # 61 tests incl. 100k-sample stress cases
 swift test --sanitize=thread --skip Performance
 ```
 
@@ -150,5 +150,5 @@ CellScan/
   Views/                     RootView, Home, NewPass, Recording, Summary, Map,
                              Export, Settings, Components, ModelUI (model colors)
   Assets.xcassets            Accent color + app icon slot
-Tests/CellScanCoreTests/     Model, merge, CSV, combine, archive and settings tests
+Tests/CellScanCoreTests/     Model, merge, CSV, combine, archive, recovery, settings tests
 ```
