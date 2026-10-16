@@ -59,6 +59,7 @@ struct ExportView: View {
                             .frame(width: 44, height: 44, alignment: .leading)
                     }
                     .accessibilityLabel("Back")
+                    .accessibilityIdentifier("export.back")
                     Spacer()
                 }
 
@@ -91,7 +92,7 @@ struct ExportView: View {
                       defaultFilename: baseFilename) { result in
             switch result {
             case .success:
-                flash($saved)
+                saved = true
             case .failure(let error):
                 // Cancelling the picker is not an error worth reporting.
                 if (error as NSError).code != NSUserCancelledError {
@@ -167,6 +168,7 @@ struct ExportView: View {
                           primary: true)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("export.save")
 
             Button {
                 UIPasteboard.general.string = csv
@@ -178,6 +180,7 @@ struct ExportView: View {
                           primary: false)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("export.copy")
         }
     }
 

@@ -173,6 +173,7 @@ struct MapScreen: View {
                     Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
                 }
                 .accessibilityLabel("Back")
+                .accessibilityIdentifier("map.back")
                 Spacer()
                 VStack(spacing: 1) {
                     Text(title)

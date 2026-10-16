@@ -108,6 +108,44 @@ jobs:
           name: e2e-artifacts
           path: e2e-artifacts
 
+  # XCUITest: drives the UI by taps — location prompt (deny + allow), record,
+  # stop/save, CSV Copy and the system Files "Save" picker, map, delete.
+  ios-ui-tests:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick an iPhone simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for rt, ds in sorted(devs.items(), reverse=True) if "iOS" in rt
+                     for d in ds if d["name"].startswith("iPhone")))')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Run UI tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project CellScan.xcodeproj -scheme CellScan \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -resultBundlePath ui-tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "Test Case|Test Suite|error:|failed|passed|\*\* TEST"
+      - name: Export UI test screenshots
+        if: always()
+        run: |
+          mkdir -p ui-screens
+          xcrun xcresulttool export attachments --path ui-tests.xcresult --output-path ui-screens || true
+          ls ui-screens | head -40
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-tests
+          path: |
+            ui-screens
+            ui-tests.xcresult
+
   # Compiles and stress-tests the platform-independent core on Linux.
   core-linux:
     runs-on: ubuntu-latest

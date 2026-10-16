@@ -63,6 +63,7 @@ struct RecordingView: View {
                 BigButton(title: "Stop", kind: .secondaryDestructive, systemIcon: "stop.fill") {
                     confirmStop = true
                 }
+                .accessibilityIdentifier("recording.stop")
                 .padding(.bottom, 30)
             }
             .padding(.horizontal, 20)
@@ -153,6 +154,7 @@ struct RecordingView: View {
         VStack(spacing: 9) {
             HStack(spacing: 9) {
                 StatTile(label: "SAMPLES", value: "\(engine.samples.count)")
+                    .accessibilityIdentifier("recording.samples")
                 StatTile(label: "CELLS (DEDUP)", value: "\(engine.cellCount)")
             }
             HStack {

@@ -169,6 +169,7 @@ struct NewPassView: View {
             BigButton(title: "Start Recording", kind: .danger, systemIcon: "record.circle") {
                 onStart(carrier, throughputOn)
             }
+            .accessibilityIdentifier("newPass.start")
             .disabled(locationBlocked)
             .opacity(locationBlocked ? 0.45 : 1)
             .accessibilityHint(locationBlocked ? "Location access is required to record" : "")

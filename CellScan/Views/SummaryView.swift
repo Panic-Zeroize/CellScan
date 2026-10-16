@@ -151,14 +151,18 @@ struct SummaryView: View {
     private var actions: some View {
         VStack(spacing: 10) {
             BigButton(title: "View Map", kind: .primary, systemIcon: "map", action: onViewMap)
+                .accessibilityIdentifier("summary.viewMap")
                 .disabled(pass.samples.isEmpty)
             BigButton(title: "Export CSV", kind: .secondary, systemIcon: "square.and.arrow.up", action: onExport)
+                .accessibilityIdentifier("summary.export")
                 .disabled(pass.samples.isEmpty)
             HStack(spacing: 28) {
                 Button("Delete") { confirmDelete = true }
                     .foregroundStyle(Theme.dangerSoft)
+                    .accessibilityIdentifier("summary.delete")
                 Button("Done", action: onDone)
                     .foregroundStyle(Color(hex: 0x8A929B))
+                    .accessibilityIdentifier("summary.done")
             }
             .font(.system(size: 15))
             .padding(.top, 4)

@@ -83,6 +83,7 @@ struct HomeView: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             .accessibilityHint(selecting ? "Toggles selection" : "Opens the pass summary. Long-press to select.")
+            .accessibilityIdentifier("passCard")
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -120,6 +121,7 @@ struct HomeView: View {
                             .frame(width: 36, height: 36)
                     }
                     .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("home.settings")
                     if !store.passes.isEmpty {
                         Button("Select") { selecting = true }
                             .font(.system(size: 15, weight: .medium))
@@ -177,6 +179,7 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.startPass")
     }
 
     // MARK: - Multi-select action bar
