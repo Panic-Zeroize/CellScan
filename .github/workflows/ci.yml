@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Compiles the full iOS app (every SwiftUI screen) with Xcode — no signing needed.
+  ios-app-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build CellScan for iOS Simulator (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild -project CellScan.xcodeproj -target CellScan -configuration Debug \
+            -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build-debug.log
+      - name: Build CellScan for iOS device (Release, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project CellScan.xcodeproj -target CellScan -configuration Release \
+            -sdk iphoneos CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build-release.log
+      - name: Report compiler warnings in project sources
+        run: |
+          grep -h -E "/CellScan/.*\.swift:[0-9]+:[0-9]+: warning:" build-*.log | sort -u || echo "No warnings"
+      - name: Check generated Info.plist
+        run: |
+          plist=$(find build -name Info.plist -path "*CellScan.app/Info.plist" | head -1)
+          echo "$plist"
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$plist"
+          /usr/libexec/PlistBuddy -c "Print :NSLocationWhenInUseUsageDescription" "$plist"
+          /usr/libexec/PlistBuddy -c "Print :UIFileSharingEnabled" "$plist"
+      - name: Core tests on macOS (Apple Foundation)
+        run: swift test
+
+  # Compiles and stress-tests the platform-independent core on Linux.
+  core-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (warnings as errors)
+        run: swift build --build-tests -Xswiftc -warnings-as-errors
+      - name: Swift 6 strict-concurrency check
+        run: swift build --build-path .build-swift6 -Xswiftc -swift-version -Xswiftc 6 -Xswiftc -warnings-as-errors
+      - name: Test
+        run: swift test
+      - name: Test under ThreadSanitizer
+        run: swift test --build-path .build-tsan --sanitize=thread --skip Performance
+      - name: AddressSanitizer + LeakSanitizer (fails on any leak from CellScan code)
+        run: Tests/check-leaks.sh
