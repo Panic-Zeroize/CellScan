@@ -112,8 +112,12 @@ swift test --sanitize=thread --skip Performance
 ```
 
 On Linux without a toolchain: `docker run --rm -v "$PWD":/src -w /src swift:6.1-noble swift test`.
-CI runs the suite (plus a warnings-as-errors and Swift 6 strict-concurrency build) on every push —
-see `.github/workflows/core-tests.yml`.
+CI (`.github/workflows/ci.yml`) runs on every push:
+- **macOS / Xcode:** builds the full app (Debug for the simulator, Release for device, unsigned),
+  verifies the generated Info.plist, and runs the core tests against Apple Foundation.
+- **Linux:** warnings-as-errors and Swift 6 strict-concurrency builds, the test suite,
+  ThreadSanitizer, and `Tests/check-leaks.sh` (AddressSanitizer + LeakSanitizer; fails on any
+  leak whose stack includes CellScanCore code).
 
 ## Notes & knobs
 
