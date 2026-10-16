@@ -121,6 +121,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   (`Tests/e2e/verify_smoke.py`) that it kept recording in the background, attached live speed-test
   results, saved and reloaded the pass, cleared the crash checkpoint, and exported a well-formed
   CSV on the route — and that no crash report was produced. Screenshots are uploaded as artifacts.
+- **UI tests (XCUITest, `CellScanUITests/`):** taps through the real app — denying location
+  disables recording and offers Open Settings; allowing it, recording a simulated drive,
+  Stop → Save Pass, summary, CSV **Copy**, CSV **Save through the system Files picker**, the map,
+  and deleting the pass. Screenshots of each step are uploaded as artifacts.
 - **Linux:** warnings-as-errors and Swift 6 strict-concurrency builds, the test suite,
   ThreadSanitizer, and `Tests/check-leaks.sh` — AddressSanitizer + LeakSanitizer with leak
   detection on, required to exit 0 (one documented suppression for a Linux-XCTest-internal
@@ -162,4 +166,5 @@ CellScan/
                              Export, Settings, Components, ModelUI (model colors)
   Assets.xcassets            Accent color + app icon slot
 Tests/CellScanCoreTests/     Model, merge, CSV, combine, archive, recovery, settings tests
+CellScanUITests/             XCUITest flows (permission, record, save, export, map, delete)
 ```

@@ -18,7 +18,7 @@ final class CellScanUITests: XCTestCase {
     }
 
     override func tearDown() {
-        if let app, testRun?.hasSucceeded == false {
+        if let app, (testRun?.totalFailureCount ?? 0) > 0 {
             let shot = XCTAttachment(screenshot: app.screenshot())
             shot.name = "failure-\(name)"
             shot.lifetime = .keepAlways
