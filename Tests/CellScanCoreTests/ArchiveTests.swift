@@ -1,7 +1,7 @@
 import XCTest
 @testable import CellScanCore
 
-final class ArchiveTests: XCTestCase {
+final class ArchiveTests: CoreTestCase {
     private var dir: URL!
     private var archive: PassArchive!
 
@@ -178,7 +178,7 @@ final class ArchiveTests: XCTestCase {
     }
 }
 
-final class SettingsTests: XCTestCase {
+final class SettingsTests: CoreTestCase {
 
     func testDefaultsRoundTrip() throws {
         let data = try JSONEncoder().encode(AppSettings.default)

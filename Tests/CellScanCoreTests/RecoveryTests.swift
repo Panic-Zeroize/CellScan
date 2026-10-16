@@ -2,7 +2,7 @@ import XCTest
 @testable import CellScanCore
 
 /// The crash-recovery lifecycle the app relies on (PassStore + RecordingEngine).
-final class RecoveryTests: XCTestCase {
+final class RecoveryTests: CoreTestCase {
     private var dir: URL!
     private var archive: PassArchive!
 

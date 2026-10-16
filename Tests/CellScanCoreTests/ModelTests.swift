@@ -1,7 +1,7 @@
 import XCTest
 @testable import CellScanCore
 
-final class ModelTests: XCTestCase {
+final class ModelTests: CoreTestCase {
 
     // MARK: - RAT / tiers
 

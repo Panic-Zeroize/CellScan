@@ -115,9 +115,16 @@ On Linux without a toolchain: `docker run --rm -v "$PWD":/src -w /src swift:6.1-
 CI (`.github/workflows/ci.yml`) runs on every push:
 - **macOS / Xcode:** builds the full app (Debug for the simulator, Release for device, unsigned),
   verifies the generated Info.plist, and runs the core tests against Apple Foundation.
+- **iOS Simulator end-to-end:** installs the Debug app, grants location, plays a simulated drive
+  (`simctl location`), launches it with `-smokeTest 75` (DEBUG-only hook in `SmokeTest.swift`,
+  compiled out of Release), sends it to the background mid-drive, then verifies
+  (`Tests/e2e/verify_smoke.py`) that it kept recording in the background, attached live speed-test
+  results, saved and reloaded the pass, cleared the crash checkpoint, and exported a well-formed
+  CSV on the route — and that no crash report was produced. Screenshots are uploaded as artifacts.
 - **Linux:** warnings-as-errors and Swift 6 strict-concurrency builds, the test suite,
-  ThreadSanitizer, and `Tests/check-leaks.sh` (AddressSanitizer + LeakSanitizer; fails on any
-  leak whose stack includes CellScanCore code).
+  ThreadSanitizer, and `Tests/check-leaks.sh` — AddressSanitizer + LeakSanitizer with leak
+  detection on, required to exit 0 (one documented suppression for a Linux-XCTest-internal
+  allocation; a leak planted in CellScanCore makes it fail).
 
 ## Notes & knobs
 

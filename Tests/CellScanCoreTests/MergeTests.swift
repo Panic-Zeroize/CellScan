@@ -1,7 +1,7 @@
 import XCTest
 @testable import CellScanCore
 
-final class MergeTests: XCTestCase {
+final class MergeTests: CoreTestCase {
 
     func testEmptyPassHasNoCells() {
         let p = Pass(carrier: .att, startedAt: Fixtures.t0, durationSec: 0, distanceMiles: 0, samples: [])

@@ -1,0 +1,7 @@
+# LeakSanitizer suppressions for the Linux XCTest harness (see Tests/check-leaks.sh).
+# Matched against mangled symbols (addr2line symbolizer). Keep these narrow:
+# a pattern matches if it appears in ANY frame of a leak stack.
+#
+# XCTWaiter.wait leaks a weak-reference side table; every other leak record is
+# an XCTest-owned object (test runs, test-case instances) reachable only from it.
+leak:6XCTest9XCTWaiterC4wait

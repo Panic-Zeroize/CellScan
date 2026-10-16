@@ -1,7 +1,7 @@
 import XCTest
 @testable import CellScanCore
 
-final class CSVTests: XCTestCase {
+final class CSVTests: CoreTestCase {
 
     func testHeaderAndColumnCount() {
         let csv = Fixtures.drive(samples: 10).csvString()
@@ -89,7 +89,7 @@ final class CSVTests: XCTestCase {
     }
 }
 
-final class CombineTests: XCTestCase {
+final class CombineTests: CoreTestCase {
 
     func testCombiningKeepsEverySampleSortedWithItsCarrier() {
         let a = Fixtures.drive(samples: 300, carrier: .verizon, startTime: Fixtures.t0 + 1000, seed: 1)
