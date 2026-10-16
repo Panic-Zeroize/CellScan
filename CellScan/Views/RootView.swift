@@ -86,6 +86,17 @@ struct RootView: View {
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
         .onAppear { takeStoreAlert() }                       // alerts raised during launch
+        .task {
+            #if DEBUG
+            // CI end-to-end test hook (see SmokeTest.swift); inert without -smokeTest.
+            await SmokeTest.run(engine: engine, store: store,
+                                onRecordingStarted: { recording = true },
+                                onFinished: { id in
+                                    recording = false
+                                    if let id { path = [.summary(id)] }
+                                })
+            #endif
+        }
         .onChange(of: store.alert) { _, _ in takeStoreAlert() }
         .onChange(of: recording) { _, _ in showNextAlertIfIdle() }
         .onChange(of: shownAlert) { _, _ in showNextAlertIfIdle() }
