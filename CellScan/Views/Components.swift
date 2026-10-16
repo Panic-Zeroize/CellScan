@@ -14,6 +14,8 @@ struct StatTile: View {
             Text(value)
                 .font(.system(size: 22, design: .monospaced))
                 .foregroundStyle(valueColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 11)
@@ -22,6 +24,7 @@ struct StatTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -120,7 +123,7 @@ struct DotLabel: View {
 
 /// Rounded primary/secondary action button matching the mock.
 struct BigButton: View {
-    enum Kind { case primary, danger, secondary }
+    enum Kind { case primary, danger, secondary, secondaryDestructive }
     var title: String
     var kind: Kind = .primary
     var systemIcon: String? = nil
@@ -150,13 +153,19 @@ struct BigButton: View {
         case .danger:
             LinearGradient(colors: [Theme.danger, Color(hex: 0xE0392F)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .secondary:
+        case .secondary, .secondaryDestructive:
             Theme.bgChip
         }
     }
-    private var foreground: Color { kind == .secondary ? Color(hex: 0xD7DBDF) : .white }
+    private var foreground: Color {
+        switch kind {
+        case .secondary: return Color(hex: 0xD7DBDF)
+        case .secondaryDestructive: return Color(hex: 0xFF6A60)
+        case .primary, .danger: return .white
+        }
+    }
     @ViewBuilder private var border: some View {
-        if kind == .secondary {
+        if kind == .secondary || kind == .secondaryDestructive {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
         }

@@ -122,17 +122,46 @@ struct NewPassView: View {
         .card(padding: 15, radius: 16)
     }
 
-    private var permissionCard: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "location.fill")
-                .foregroundStyle(Theme.accent)
-            (Text("Uses ").foregroundColor(Color(hex: 0xAEB6BE))
-             + Text("When-In-Use").foregroundColor(Color(hex: 0xD7DBDF)).bold()
-             + Text(" location with background updates — the blue bar shows while recording.")
-                .foregroundColor(Color(hex: 0xAEB6BE)))
-                .font(.system(size: 13))
+    private var locationBlocked: Bool {
+        engine.locationAccess == .denied || engine.locationAccess == .restricted
+    }
+
+    @ViewBuilder private var permissionCard: some View {
+        if locationBlocked {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(alignment: .top, spacing: 11) {
+                    Image(systemName: "location.slash.fill")
+                        .foregroundStyle(Theme.dangerSoft)
+                    Text(engine.locationAccess == .restricted
+                         ? "Location access is restricted on this device (Screen Time or a device profile). CellScan can’t record without it."
+                         : "Location access is off for CellScan, or Location Services are disabled. Turn it on to record a pass.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color(hex: 0xF4A0A8))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if engine.locationAccess == .denied {
+                    Button {
+                        AppLinks.openSettings()
+                    } label: {
+                        Text("Open Settings")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+            }
+            .card(padding: 14, radius: 16)
+        } else {
+            HStack(spacing: 11) {
+                Image(systemName: "location.fill")
+                    .foregroundStyle(Theme.accent)
+                (Text("Uses ").foregroundColor(Color(hex: 0xAEB6BE))
+                 + Text("When-In-Use").foregroundColor(Color(hex: 0xD7DBDF)).bold()
+                 + Text(" location with background updates — the blue bar shows while recording.")
+                    .foregroundColor(Color(hex: 0xAEB6BE)))
+                    .font(.system(size: 13))
+            }
+            .card(padding: 14, radius: 16)
         }
-        .card(padding: 14, radius: 16)
     }
 
     private var bottomBar: some View {
@@ -140,6 +169,9 @@ struct NewPassView: View {
             BigButton(title: "Start Recording", kind: .danger, systemIcon: "record.circle") {
                 onStart(carrier, throughputOn)
             }
+            .disabled(locationBlocked)
+            .opacity(locationBlocked ? 0.45 : 1)
+            .accessibilityHint(locationBlocked ? "Location access is required to record" : "")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)

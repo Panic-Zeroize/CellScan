@@ -19,23 +19,32 @@ struct CSVDocument: FileDocument {
 }
 
 struct ExportView: View {
-    var passes: [Pass]
+    let passes: [Pass]
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingSaver = false
     @State private var copied = false
     @State private var saved = false
+    @State private var errorMessage: String?
 
-    private var isSingle: Bool { passes.count == 1 }
-    private var csv: String { isSingle ? passes[0].csvString() : Pass.combinedCSV(passes) }
-    private var byteCount: Int { csv.utf8.count }
-    private var rowCount: Int { passes.reduce(0) { $0 + $1.samples.count } }
+    // Built once — re-rendering a multi-thousand-row CSV on every redraw is slow.
+    private let csv: String
+    private let document: CSVDocument
+    private let fileName: String
+    private let rowCount: Int
+    private let previewLines: [String]
 
-    private var fileName: String {
-        if isSingle { return passes[0].csvFileName }
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-        return "cellscan_combined_\(df.string(from: Date())).csv"
+    init(passes: [Pass]) {
+        self.passes = passes
+        let csv = CSV.document(for: passes)
+        self.csv = csv
+        self.document = CSVDocument(text: csv)
+        self.fileName = CSV.fileName(for: passes)
+        self.rowCount = passes.reduce(0) { $0 + $1.samples.count }
+        self.previewLines = Array(csv.split(separator: "\n").prefix(6)).map(String.init)
     }
+
+    private var byteCount: Int { csv.utf8.count }
     private var baseFilename: String { (fileName as NSString).deletingPathExtension }
 
     var body: some View {
@@ -47,12 +56,18 @@ struct ExportView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Theme.textBright)
+                            .frame(width: 44, height: 44, alignment: .leading)
                     }
+                    .accessibilityLabel("Back")
                     Spacer()
                 }
-                .padding(.top, 8).padding(.bottom, 8)
 
                 Text("Export CSV").font(.system(size: 28, weight: .bold))
+                if passes.count > 1 {
+                    Text("\(passes.count) passes combined into one file, sorted by time")
+                        .font(.system(size: 13)).foregroundStyle(Theme.textDim)
+                        .padding(.top, 2)
+                }
 
                 fileRow.padding(.top, 15)
                 preview.padding(.top, 13)
@@ -71,12 +86,32 @@ struct ExportView: View {
             .padding(.horizontal, 20)
         }
         .fileExporter(isPresented: $showingSaver,
-                      document: CSVDocument(text: csv),
+                      document: document,
                       contentType: .commaSeparatedText,
                       defaultFilename: baseFilename) { result in
-            if case .success = result { saved = true }
+            switch result {
+            case .success:
+                flash($saved)
+            case .failure(let error):
+                // Cancelling the picker is not an error worth reporting.
+                if (error as NSError).code != NSUserCancelledError {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+        .alert("Couldn’t save the file",
+               isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text((errorMessage ?? "") + "\n\nYou can still use Copy and paste the data elsewhere.")
         }
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    /// Shows a confirmation state on a button for two seconds.
+    private func flash(_ flag: Binding<Bool>) {
+        flag.wrappedValue = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { flag.wrappedValue = false }
     }
 
     private var fileRow: some View {
@@ -135,7 +170,8 @@ struct ExportView: View {
 
             Button {
                 UIPasteboard.general.string = csv
-                copied = true
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                flash($copied)
             } label: {
                 pillLabel(copied ? "Copied" : "Copy",
                           systemImage: copied ? "checkmark" : "doc.on.doc",
@@ -164,10 +200,6 @@ struct ExportView: View {
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
             }
         }
-    }
-
-    private var previewLines: [String] {
-        Array(csv.split(separator: "\n", omittingEmptySubsequences: false).prefix(6)).map(String.init)
     }
 
     private var sizeString: String {

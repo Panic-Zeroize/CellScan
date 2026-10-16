@@ -22,11 +22,16 @@ final class ThroughputTester {
 
     /// One probe: latency, then a capped download, then a small upload.
     /// `downloadBytes` is adaptive — the engine shrinks it in weak coverage.
-    func measure(downloadBytes: Int = 1_500_000, uploadBytes: Int = 400_000) async -> ThroughputResult {
+    /// Returns `nil` if the probe was cancelled (pass stopped) so callers never
+    /// record a half-finished measurement as a dead zone.
+    func measure(downloadBytes: Int = 1_500_000, uploadBytes: Int = 400_000) async -> ThroughputResult? {
         let latency = await measureLatency()
-        let down = await measureDownload(bytes: downloadBytes)
+        if Task.isCancelled { return nil }
+        let down = await measureDownload(bytes: max(1, downloadBytes))
+        if Task.isCancelled { return nil }
         // Only spend upload budget if we actually have a working link.
-        let up = down == nil ? nil : await measureUpload(bytes: uploadBytes)
+        let up = down == nil ? nil : await measureUpload(bytes: max(1, uploadBytes))
+        if Task.isCancelled { return nil }
         return ThroughputResult(downMbps: down, upMbps: up, latencyMs: latency)
     }
 

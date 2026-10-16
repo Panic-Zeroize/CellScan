@@ -9,6 +9,7 @@ xcuserdata/
 
 # Swift Package Manager
 .build/
+.build-*/
 .swiftpm/
 
 # CocoaPods / Carthage (unused, but ignore if added)

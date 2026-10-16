@@ -12,12 +12,14 @@ struct HomeView: View {
     @State private var confirmDelete = false
 
     var body: some View {
+        let recent = store.recent
+        let older = store.older
         ZStack {
             Theme.bg.ignoresSafeArea()
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     header
-                    titleBlock
+                    titleBlock(recentCount: recent.count, totalCount: store.passes.count)
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
 
@@ -27,28 +29,20 @@ struct HomeView: View {
                             .padding(.top, 14)
                     }
 
-                    Text("RECENT")
-                        .sectionHeader()
-                        .padding(.horizontal, 22)
-                        .padding(.top, 18)
-                        .padding(.bottom, 8)
-
-                    if store.recent.isEmpty {
+                    if store.passes.isEmpty {
+                        sectionHeader("RECENT")
                         emptyState
                     } else {
-                        ForEach(store.recent) { pass in
-                            PassCard(pass: pass, selecting: selecting,
-                                     selected: selectedIDs.contains(pass.id))
-                                .padding(.horizontal, 20)
-                                .padding(.bottom, 12)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if selecting { toggle(pass.id) } else { onOpenPass(pass.id) }
-                                }
-                                .onLongPressGesture {
-                                    if !selecting { selecting = true }
-                                    toggle(pass.id)
-                                }
+                        sectionHeader("LAST 7 DAYS")
+                        if recent.isEmpty {
+                            Text("No passes this week.")
+                                .font(.system(size: 13)).foregroundStyle(Theme.textFaint)
+                                .padding(.horizontal, 22).padding(.bottom, 6)
+                        }
+                        ForEach(recent) { pass in card(pass) }
+                        if !older.isEmpty {
+                            sectionHeader("EARLIER")
+                            ForEach(older) { pass in card(pass) }
                         }
                     }
                 }
@@ -63,7 +57,40 @@ struct HomeView: View {
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive, action: deleteSelected)
             Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This can’t be undone. Export first if you want to keep the data.")
         }
+        .onChange(of: store.passes.count) { _, _ in
+            // Drop selections for passes that no longer exist.
+            let existing = Set(store.passes.map(\.id))
+            selectedIDs.formIntersection(existing)
+            if store.passes.isEmpty { selecting = false }
+        }
+    }
+
+    private func card(_ pass: Pass) -> some View {
+        PassCard(pass: pass, selecting: selecting, selected: selectedIDs.contains(pass.id))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if selecting { toggle(pass.id) } else { onOpenPass(pass.id) }
+            }
+            .onLongPressGesture {
+                if !selecting { selecting = true }
+                toggle(pass.id)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(selecting ? "Toggles selection" : "Opens the pass summary. Long-press to select.")
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .sectionHeader()
+            .padding(.horizontal, 22)
+            .padding(.top, 18)
+            .padding(.bottom, 8)
     }
 
     // MARK: - Header
@@ -77,6 +104,8 @@ struct HomeView: View {
                     .tracking(1.2)
                     .foregroundStyle(Theme.textBright)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("CellScan")
             Spacer()
             if selecting {
                 Button("Done") { endSelecting() }
@@ -88,8 +117,10 @@ struct HomeView: View {
                         Image(systemName: "gearshape")
                             .font(.system(size: 18))
                             .foregroundStyle(Color(hex: 0x9AA3AD))
+                            .frame(width: 36, height: 36)
                     }
-                    if !store.recent.isEmpty {
+                    .accessibilityLabel("Settings")
+                    if !store.passes.isEmpty {
                         Button("Select") { selecting = true }
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(Theme.accent)
@@ -101,13 +132,15 @@ struct HomeView: View {
         .padding(.top, 8)
     }
 
-    private var titleBlock: some View {
+    private func titleBlock(recentCount: Int, totalCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Passes")
                 .font(.system(size: 33, weight: .bold))
             Text(selecting
                  ? "\(selectedIDs.count) selected"
-                 : "\(store.recent.count) recorded · last 7 days")
+                 : (totalCount == recentCount
+                    ? "\(recentCount) recorded · last 7 days"
+                    : "\(recentCount) this week · \(totalCount) total"))
                 .font(.system(size: 13.5))
                 .foregroundStyle(selecting ? Theme.accent : Theme.textDim)
         }
@@ -143,6 +176,7 @@ struct HomeView: View {
             .shadow(color: Theme.accent.opacity(0.32), radius: 12, y: 8)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Multi-select action bar
@@ -174,10 +208,12 @@ struct HomeView: View {
                 Text(title).font(.system(size: 11, weight: .medium))
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
             .foregroundStyle(destructive ? Theme.dangerSoft : (enabled ? Theme.accent : Theme.textFaint))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .accessibilityHint(title == "Combine" && !enabled ? "Select at least two passes to combine" : "")
     }
 
     private var emptyState: some View {
@@ -209,27 +245,20 @@ struct HomeView: View {
         selectedIDs = []
     }
 
-    /// Selected passes in the order they appear (newest first).
-    private func selectedPasses() -> [Pass] {
-        store.recent.filter { selectedIDs.contains($0.id) }
-    }
+    /// Selected pass ids in list order (newest first).
     private func orderedSelection() -> [UUID] {
-        selectedPasses().map { $0.id }
+        store.passes.map(\.id).filter { selectedIDs.contains($0) }
     }
 
     private func deleteSelected() {
-        for pass in selectedPasses() { store.delete(pass) }
+        store.delete(ids: selectedIDs)
         endSelecting()
     }
 
-    /// Merge the selected passes into one new pass, delete the originals,
-    /// and open the merged pass's summary.
+    /// Merge the selected passes into one new pass (originals removed in the same
+    /// save) and open the merged pass's summary.
     private func combineSelected() {
-        let passes = selectedPasses()
-        guard passes.count >= 2 else { return }
-        let merged = Pass.combining(passes)
-        store.add(merged)
-        passes.forEach { store.delete($0) }
+        guard let merged = store.combine(ids: orderedSelection()) else { return }
         endSelecting()
         onOpenPass(merged.id)
     }
@@ -252,32 +281,33 @@ struct LogoMark: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .shadow(color: Theme.accent.opacity(0.45), radius: 7)
+        .accessibilityHidden(true)
     }
 }
 
-/// A recent-pass summary card.
+/// A pass summary card.
 struct PassCard: View {
     @EnvironmentObject var settingsStore: SettingsStore
     var pass: Pass
     var selecting: Bool = false
     var selected: Bool = false
 
-    private var cells: [Cell] {
-        pass.mergedCells(gridMeters: settingsStore.settings.cellMergeMeters,
-                         average: settingsStore.settings.averageCells)
-    }
-    private var deadCount: Int { cells.filter { $0.rat == .none }.count }
-
     var body: some View {
+        // Merge once per render; every stat below reads from this.
+        let breakdown = CoverageBreakdown(cells: pass.mergedCells(
+            gridMeters: settingsStore.settings.cellMergeMeters,
+            average: settingsStore.settings.averageCells))
         VStack(alignment: .leading, spacing: 13) {
             HStack {
-                DotLabel(color: pass.carrier.color, text: pass.carrier.displayName, size: 9)
+                DotLabel(color: pass.carrierColor, text: pass.carrierLabel, size: 9)
                     .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
                 Spacer()
                 if selecting {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 20))
                         .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
+                        .accessibilityLabel(selected ? "Selected" : "Not selected")
                 } else {
                     Text(RelativeDate.string(pass.startedAt))
                         .font(.system(size: 12.5))
@@ -287,11 +317,12 @@ struct PassCard: View {
             HStack(spacing: 22) {
                 miniStat("TIME", pass.durationString)
                 miniStat("DIST", settingsStore.settings.distanceString(miles: pass.distanceMiles))
-                miniStat("CELLS", "\(cells.count)")
-                miniStat("DEAD", "\(deadCount)",
-                         color: deadCount > 0 ? Theme.dangerSoft : Theme.textBright)
+                miniStat("CELLS", "\(breakdown.totalCells)")
+                miniStat("DEAD", "\(breakdown.deadCells)",
+                         color: breakdown.deadCells > 0 ? Theme.dangerSoft : Theme.textBright)
             }
-            CoverageBar(segments: ratSegments, height: 7)
+            CoverageBar(segments: breakdown.segments.map { ($0.rat.color, $0.fraction) }, height: 7)
+                .accessibilityHidden(true)
         }
         .card()
         .overlay(
@@ -304,26 +335,7 @@ struct PassCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.system(size: 9)).tracking(1).foregroundStyle(Theme.textFaint)
             Text(value).font(.system(size: 15, design: .monospaced)).foregroundStyle(color)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
-    }
-
-    private var ratSegments: [(color: Color, fraction: Double)] {
-        let total = max(1, cells.count)
-        let order: [RAT] = [.fiveG, .lte, .threeG, .none]
-        return order.map { rat in
-            let n = cells.filter { $0.rat == rat }.count
-            return (rat.color, Double(n) / Double(total))
-        }
-    }
-}
-
-enum RelativeDate {
-    static func string(_ date: Date) -> String {
-        let cal = Calendar.current
-        let time = date.formatted(date: .omitted, time: .shortened)
-        if cal.isDateInToday(date) { return "Today · \(time)" }
-        if cal.isDateInYesterday(date) { return "Yesterday · \(time)" }
-        let wd = date.formatted(.dateTime.weekday(.abbreviated))
-        return "\(wd) · \(time)"
     }
 }

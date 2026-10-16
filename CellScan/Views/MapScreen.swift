@@ -9,35 +9,86 @@ struct MapScreen: View {
 
     enum Mode { case rat, throughput }
     @State private var mode: Mode = .throughput   // color by real speed by default
+    @State private var didPickMode = false
     @State private var selected: Cell?
     @State private var position: MapCameraPosition
     @State private var enabledLayers: Set<Carrier>
+    /// Cached per-carrier cells; rebuilt only when the passes or settings change,
+    /// not on every redraw (tapping a cell used to re-merge the whole route).
+    @State private var layers: [Layer] = []
+
+    struct Layer: Identifiable {
+        var carrier: Carrier
+        var cells: [Cell]
+        /// Route line split wherever consecutive cells are > 5 min apart, so
+        /// separate drives aren't joined by a straight line across the map.
+        var segments: [[CLLocationCoordinate2D]]
+        var id: Carrier { carrier }
+    }
 
     init(passes: [Pass], title: String) {
         self.passes = passes
         self.title = title
         _position = State(initialValue: .region(Self.region(for: passes)))
-        _enabledLayers = State(initialValue: Set(passes.map { $0.carrier }))
+        _enabledLayers = State(initialValue: Set(passes.flatMap(\.carriers)))
     }
 
     // MARK: - Derived data
 
-    private var groups: [(carrier: Carrier, cells: [Cell])] {
-        passes.map { p in
-            (carrier: p.carrier,
-             cells: p.mergedCells(gridMeters: settingsStore.settings.cellMergeMeters,
-                                  average: settingsStore.settings.averageCells))
+    private var visibleLayers: [Layer] { layers.filter { enabledLayers.contains($0.carrier) } }
+
+    struct RouteLine: Identifiable {
+        var id: String
+        var carrier: Carrier
+        var coordinates: [CLLocationCoordinate2D]
+    }
+
+    /// Every visible route segment as one flat list (one ForEach in the map).
+    private var routeLines: [RouteLine] {
+        visibleLayers.flatMap { layer in
+            layer.segments.enumerated().map { idx, coords in
+                RouteLine(id: "\(layer.carrier.rawValue)-\(idx)", carrier: layer.carrier, coordinates: coords)
+            }
         }
     }
-    private var visibleGroups: [(carrier: Carrier, cells: [Cell])] {
-        groups.filter { enabledLayers.contains($0.carrier) }
-    }
-    private var cells: [Cell] { visibleGroups.flatMap { $0.cells } }
 
-    private var carriers: [Carrier] {
-        var seen: [Carrier] = []
-        for p in passes where !seen.contains(p.carrier) { seen.append(p.carrier) }
-        return seen
+    /// Changes when the passes shown here change (e.g. after a combine/delete).
+    private var passesSignature: String {
+        passes.map { "\($0.id.uuidString):\($0.samples.count)" }.joined(separator: ",")
+    }
+    private var cells: [Cell] { visibleLayers.flatMap(\.cells) }
+    private var carriers: [Carrier] { layers.map(\.carrier) }
+
+    private func rebuildLayers() {
+        let s = settingsStore.settings
+        var byCarrier: [Carrier: [Cell]] = [:]
+        var order: [Carrier] = []
+        for pass in passes {
+            for cell in pass.mergedCells(gridMeters: s.cellMergeMeters, average: s.averageCells) {
+                if byCarrier[cell.carrier] == nil { order.append(cell.carrier) }
+                byCarrier[cell.carrier, default: []].append(cell)
+            }
+        }
+        layers = order.map { carrier in
+            let cells = (byCarrier[carrier] ?? []).sorted { $0.time < $1.time }
+            var segments: [[CLLocationCoordinate2D]] = []
+            var current: [CLLocationCoordinate2D] = []
+            var lastTime: Date?
+            for cell in cells {
+                if let t = lastTime, cell.time.timeIntervalSince(t) > 300 {
+                    if current.count > 1 { segments.append(current) }
+                    current = []
+                }
+                current.append(cell.coordinate)
+                lastTime = cell.time
+            }
+            if current.count > 1 { segments.append(current) }
+            return Layer(carrier: carrier, cells: cells, segments: segments)
+        }
+        // Keep the detail card in sync with the rebuilt cells.
+        if let sel = selected {
+            selected = layers.flatMap { $0.cells }.first(where: { $0.id == sel.id })
+        }
     }
 
     var body: some View {
@@ -48,20 +99,39 @@ struct MapScreen: View {
             modeSwitch
             layerChips
             legend
+            if !layers.isEmpty && cells.isEmpty { emptyOverlay }
             if let sel = selected { detailSheet(sel) }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            rebuildLayers()
+            // Passes recorded with the speed test off have no throughput data —
+            // coloring them by throughput would paint the whole route "No data" red.
+            if !didPickMode {
+                didPickMode = true
+                if !layers.contains(where: { $0.cells.contains { $0.downMbps != nil } }) { mode = .rat }
+            }
+        }
+        .onChange(of: settingsStore.settings) { _, _ in rebuildLayers() }
+        .onChange(of: passesSignature) { _, _ in rebuildLayers() }
+    }
+
+    private var emptyOverlay: some View {
+        Text("All layers are hidden — tap a carrier to show it.")
+            .font(.system(size: 13))
+            .foregroundStyle(Theme.textDim)
+            .padding(.vertical, 10).padding(.horizontal, 14)
+            .background(glass)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Map
 
     private var mapLayer: some View {
         Map(position: $position) {
-            ForEach(Array(visibleGroups.enumerated()), id: \.offset) { _, g in
-                if g.cells.count > 1 {
-                    MapPolyline(coordinates: g.cells.map { $0.coordinate })
-                        .stroke(g.carrier.color.opacity(0.45), lineWidth: 2.5)
-                }
+            ForEach(routeLines) { line in
+                MapPolyline(coordinates: line.coordinates)
+                    .stroke(line.carrier.color.opacity(0.45), lineWidth: 2.5)
             }
             ForEach(cells) { cell in
                 Annotation("", coordinate: cell.coordinate) {
@@ -82,7 +152,12 @@ struct MapScreen: View {
             .frame(width: size, height: size)
             .overlay(Circle().strokeBorder(isSel ? Color.white : col, lineWidth: isSel ? 2 : 1.5))
             .shadow(color: col.opacity(0.6), radius: isSel ? 8 : 4)
+            .frame(width: 30, height: 30)          // comfortable tap target
+            .contentShape(Circle())
             .onTapGesture { withAnimation { selected = cell } }
+            .accessibilityElement()
+            .accessibilityLabel("\(cell.carrier.displayName) \(cell.rat.label), \(cell.downMbps.map { String(format: "%.0f megabits", $0) } ?? "no speed data")")
+            .accessibilityAddTraits(.isButton)
     }
 
     // MARK: - Overlays
@@ -93,10 +168,12 @@ struct MapScreen: View {
                 glassButton { dismiss() } content: {
                     Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
                 }
+                .accessibilityLabel("Back")
                 Spacer()
                 VStack(spacing: 1) {
                     Text(title)
                         .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
                     Text("\(cells.count) cells · tap for detail")
                         .font(.system(size: 10.5)).foregroundStyle(Color(hex: 0x8A929B))
                 }
@@ -213,6 +290,7 @@ struct MapScreen: View {
                             .frame(width: 30, height: 30)
                             .background(Color(hex: 0x1E222A)).clipShape(Circle())
                     }
+                    .accessibilityLabel("Close detail")
                 }
                 HStack {
                     Text(String(format: "%.5f, %.5f", cell.lat, cell.lng))
@@ -293,15 +371,16 @@ struct MapScreen: View {
     private var legendItems: [(color: Color, label: String)] {
         if mode == .rat {
             return [(RAT.fiveG.color, "5G"), (RAT.lte.color, "LTE"),
-                    (RAT.threeG.color, "3G"), (RAT.none.color, "No service")]
+                    (RAT.threeG.color, "3G"), (RAT.twoG.color, "2G"), (RAT.none.color, "No service")]
         } else {
             return [(CoverageTier.great.color, "> 120 Mbps"), (CoverageTier.good.color, "30–120"),
-                    (CoverageTier.ok.color, "5–30"), (CoverageTier.dead.color, "No data")]
+                    (CoverageTier.ok.color, "5–30"), (CoverageTier.poor.color, "< 5"),
+                    (CoverageTier.dead.color, "No data")]
         }
     }
 
     private static func region(for passes: [Pass]) -> MKCoordinateRegion {
-        let coords = passes.flatMap { $0.samples.map { ($0.lat, $0.lng) } }
+        let coords = passes.flatMap { $0.samples.filter(\.hasValidCoordinate).map { ($0.lat, $0.lng) } }
         guard let first = coords.first else {
             return MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
@@ -314,18 +393,10 @@ struct MapScreen: View {
         }
         let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
                                             longitude: (minLng + maxLng) / 2)
+        // MapKit rejects spans beyond the globe, so clamp.
         let span = MKCoordinateSpan(
-            latitudeDelta: max(0.008, (maxLat - minLat) * 1.5),
-            longitudeDelta: max(0.008, (maxLng - minLng) * 1.5))
+            latitudeDelta: min(170, max(0.008, (maxLat - minLat) * 1.5)),
+            longitudeDelta: min(350, max(0.008, (maxLng - minLng) * 1.5)))
         return MKCoordinateRegion(center: center, span: span)
-    }
-}
-
-extension RelativeDate {
-    static func short(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        return date.formatted(.dateTime.month().day())
     }
 }

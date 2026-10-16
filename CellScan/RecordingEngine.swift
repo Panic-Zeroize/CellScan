@@ -4,37 +4,47 @@ import Combine
 import UIKit
 
 /// Orchestrates a live recording pass: pulls GPS fixes, reads the radio type,
-/// runs periodic throughput probes, and accumulates samples.
+/// runs periodic throughput probes, accumulates samples, and checkpoints the
+/// pass to disk so a crash or force-quit never loses the drive.
 @MainActor
 final class RecordingEngine: ObservableObject {
     // Live state surfaced to the UI
-    @Published var isRecording = false
-    @Published var elapsed = 0
-    @Published var samples: [Sample] = []
-    @Published var currentRat: RAT = .none
+    @Published private(set) var isRecording = false
+    @Published private(set) var elapsed = 0
+    @Published private(set) var samples: [Sample] = []
+    @Published private(set) var currentRat: RAT = .none
     /// Recent per-sample download measurements, for the speed-colored sparkline.
-    @Published var sparks: [Double?] = []
+    @Published private(set) var sparks: [Double?] = []
     @Published private(set) var distanceMeters: Double = 0
     @Published private(set) var cellCount = 0
-    @Published var lastResult: ThroughputResult?
+    @Published private(set) var lastResult: ThroughputResult?
+    @Published private(set) var probing = false
+    /// True while recording but the latest GPS fix is missing or too old.
+    @Published private(set) var waitingForGPS = false
+    @Published private(set) var locationAccess: LocationAccess = .notDetermined
+    @Published private(set) var gpsMessage: String?
 
     // Pass configuration
-    @Published var carrier: Carrier = .verizon
-    @Published var throughputEnabled = true
+    @Published private(set) var carrier: Carrier = .verizon
+    @Published private(set) var throughputEnabled = true
 
     let location = LocationManager()
     private let radio = RadioMonitor()
     private let tester = ThroughputTester()
+    private let archive: PassArchive
 
     private var timer: Timer?
+    private var passID = UUID()
     private var startedAt = Date()
     private var lastSampleLocation: CLLocation?
     private var lastResultAt: Date?
-    private var throughputRunning = false
+    private var probeTask: Task<Void, Never>?
     private var gridKeys = Set<String>()
     private var locationSubscription: AnyCancellable?
     private var lastSampleDate = Date.distantPast
     private var lastThroughputDate = Date.distantPast
+    private var samplesSinceCheckpoint = 0
+    private var lastCheckpointDate = Date.distantPast
 
     /// Snapshot of settings taken at the start of a pass.
     private var settings = AppSettings.default
@@ -42,47 +52,112 @@ final class RecordingEngine: ObservableObject {
     private var sampleInterval: Int { max(1, settings.sampleIntervalSec) }
     private var throughputInterval: Int { settings.throughputIntervalSec }
     private var throughputActive: Bool { throughputEnabled && throughputInterval > 0 }
+    /// A probe result is attached to samples for this long after it completes.
+    private var resultFreshness: TimeInterval { max(45, Double(throughputInterval) * 2 + 15) }
+    /// A GPS fix older than this is treated as lost (tunnel, garage, no sky).
+    private var maxFixAge: TimeInterval { max(10, Double(sampleInterval) * 3) }
+
+    init(archive: PassArchive = .standard) {
+        self.archive = archive
+        location.$access.assign(to: &$locationAccess)
+        location.$lastErrorMessage.assign(to: &$gpsMessage)
+    }
 
     // MARK: - Control
 
     func requestPermission() { location.requestPermission() }
 
     func start(carrier: Carrier, throughputEnabled: Bool, settings: AppSettings) {
+        guard !isRecording else { return }
         self.carrier = carrier
         self.throughputEnabled = throughputEnabled
-        self.settings = settings
+        self.settings = settings.sanitized()
         reset()
-        isRecording = true
+        passID = UUID()
         startedAt = Date()
+        isRecording = true
+        waitingForGPS = true
         location.requestPermission()
         location.startUpdating()
-        currentRat = radio.refresh()
+        currentRat = radio.current()
         UIApplication.shared.isIdleTimerDisabled = true
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
-        // Drive sampling from location updates so recording continues with screen off.
+        RunLoop.main.add(t, forMode: .common)   // keep ticking while the user scrolls
+        timer = t
+
+        // Location updates also drive sampling, so recording continues with the
+        // screen off (timers don't fire in the background; location callbacks do).
         locationSubscription = location.$location
             .compactMap { $0 }
             .sink { [weak self] _ in
-                Task { @MainActor in self?.backgroundSampleIfNeeded() }
+                Task { @MainActor in self?.tick() }
             }
-        if throughputActive { runThroughput() }
+
+        if throughputActive {
+            lastThroughputDate = Date()
+            runThroughput()
+        }
     }
 
-    /// Stops recording and returns the finished pass (nil if nothing was captured).
+    /// Stops recording and returns the finished pass, or nil if no samples were
+    /// captured (the caller should tell the user nothing was recorded).
     func stop() -> Pass? {
+        guard isRecording else { return nil }
+        let pass = currentPass()
+        teardown()
+        if pass.samples.isEmpty {
+            clearCheckpoint()
+            return nil
+        }
+        // The checkpoint is cleared by PassStore only after the pass is safely saved.
+        return pass
+    }
+
+    /// Stops recording and throws the data away.
+    func discard() {
+        guard isRecording else { return }
+        teardown()
+        clearCheckpoint()
+    }
+
+    /// Writes a crash-recovery snapshot right now (e.g. when the app is backgrounded).
+    func checkpointNow() {
+        guard isRecording, !samples.isEmpty else { return }
+        samplesSinceCheckpoint = 0
+        lastCheckpointDate = Date()
+        let pass = currentPass()
+        let archive = self.archive
+        // Best effort: a failed checkpoint only reduces crash protection, it never
+        // affects the recording itself, so it is not surfaced as an error.
+        Persistence.queue.async { try? archive.writeCheckpoint(pass) }
+    }
+
+    private func currentPass() -> Pass {
+        Pass(id: passID,
+             carrier: carrier,
+             startedAt: startedAt,
+             durationSec: Int(Date().timeIntervalSince(startedAt)),
+             distanceMiles: distanceMeters / AppSettings.metersPerMile,
+             samples: samples)
+    }
+
+    private func teardown() {
         timer?.invalidate(); timer = nil
         locationSubscription?.cancel(); locationSubscription = nil
+        probeTask?.cancel(); probeTask = nil
+        probing = false
         location.stopUpdating()
         UIApplication.shared.isIdleTimerDisabled = false
         isRecording = false
-        guard !samples.isEmpty else { return nil }
-        return Pass(carrier: carrier,
-                    startedAt: startedAt,
-                    durationSec: elapsed,
-                    distanceMiles: distanceMeters / 1609.344,
-                    samples: samples)
+        waitingForGPS = false
+    }
+
+    private func clearCheckpoint() {
+        let archive = self.archive
+        Persistence.queue.async { archive.clearCheckpoint() }
     }
 
     private func reset() {
@@ -96,29 +171,23 @@ final class RecordingEngine: ObservableObject {
         lastSampleLocation = nil
         lastSampleDate = .distantPast
         lastThroughputDate = .distantPast
+        samplesSinceCheckpoint = 0
+        lastCheckpointDate = Date()
         gridKeys.removeAll()
     }
 
     // MARK: - Sampling cadence
 
     private func tick() {
-        // Derive elapsed from wall time so it stays accurate after background gaps.
-        elapsed = Int(Date().timeIntervalSince(startedAt))
-        sampleIfDue(Date())
-    }
-
-    /// Called on each location update while in the background (timer doesn't fire then).
-    private func backgroundSampleIfNeeded() {
-        guard isRecording, UIApplication.shared.applicationState == .background else { return }
+        guard isRecording else { return }
         let now = Date()
-        elapsed = Int(now.timeIntervalSince(startedAt))
-        sampleIfDue(now)
-    }
+        // Derive elapsed from wall time so it stays accurate after background gaps.
+        elapsed = max(0, Int(now.timeIntervalSince(startedAt)))
+        waitingForGPS = location.location.map { now.timeIntervalSince($0.timestamp) > maxFixAge } ?? true
 
-    private func sampleIfDue(_ now: Date) {
         if now.timeIntervalSince(lastSampleDate) >= Double(sampleInterval) {
             lastSampleDate = now
-            captureSample()
+            captureSample(now: now)
         }
         if throughputActive, now.timeIntervalSince(lastThroughputDate) >= Double(throughputInterval) {
             lastThroughputDate = now
@@ -126,9 +195,12 @@ final class RecordingEngine: ObservableObject {
         }
     }
 
-    private func captureSample() {
-        currentRat = radio.refresh()
-        guard let loc = location.location else { return }
+    private func captureSample(now: Date) {
+        currentRat = radio.current()
+        // No fresh fix → no sample. Re-using a stale position would stamp
+        // coverage onto the wrong place (e.g. the tunnel entrance).
+        guard let loc = location.location,
+              now.timeIntervalSince(loc.timestamp) <= maxFixAge else { return }
 
         // Distance-interval gating: skip if we haven't moved far enough yet.
         if settings.minSampleDistanceM > 0, let prev = lastSampleLocation,
@@ -138,35 +210,32 @@ final class RecordingEngine: ObservableObject {
 
         // Attach the most recent throughput result if it's still fresh.
         var down: Double?, up: Double?, latency: Double?
-        if let r = lastResult, let at = lastResultAt,
-           Date().timeIntervalSince(at) < 45 {
+        if let r = lastResult, let at = lastResultAt, now.timeIntervalSince(at) < resultFreshness {
             down = r.downMbps; up = r.upMbps; latency = r.latencyMs
         }
 
-        let speedMph = max(0, loc.speed) * 2.2369362920544
-        let heading = loc.course >= 0 ? loc.course : 0
-
-        let sample = Sample(t: Date(),
+        let sample = Sample(t: now,
                             lat: loc.coordinate.latitude,
                             lng: loc.coordinate.longitude,
-                            accuracy: max(0, loc.horizontalAccuracy),
-                            speedMph: speedMph,
-                            heading: heading,
+                            accuracy: loc.horizontalAccuracy,
+                            speedMph: loc.speed >= 0 ? loc.speed * AppSettings.mphPerMetersPerSecond : 0,
+                            heading: loc.course >= 0 ? loc.course : 0,
                             rat: currentRat,
                             downMbps: down,
                             upMbps: up,
-                            latencyMs: latency)
+                            latencyMs: latency).sanitized()
+        guard sample.hasValidCoordinate else { return }
         samples.append(sample)
 
-        // Sparkline history — now driven by measured download speed.
+        // Sparkline history — driven by measured download speed.
         sparks.append(down)
         if sparks.count > 26 { sparks.removeFirst(sparks.count - 26) }
 
         // Dedup cell count on the same grid as Pass.mergedCells.
-        let cellDeg = max(settings.cellMergeMeters, 10) / 111_000.0
-        let key = "\(Int((sample.lat / cellDeg).rounded(.down)))_\(Int((sample.lng / cellDeg).rounded(.down)))"
-        gridKeys.insert(key)
-        cellCount = gridKeys.count
+        if let key = CoverageGrid.key(lat: sample.lat, lng: sample.lng, gridMeters: settings.cellMergeMeters) {
+            gridKeys.insert(key)
+            cellCount = gridKeys.count
+        }
 
         // Distance
         if let prev = lastSampleLocation {
@@ -174,11 +243,15 @@ final class RecordingEngine: ObservableObject {
             if d.isFinite, d < 2000 { distanceMeters += d } // skip GPS jumps
         }
         lastSampleLocation = loc
+
+        samplesSinceCheckpoint += 1
+        if samplesSinceCheckpoint >= 10 || now.timeIntervalSince(lastCheckpointDate) >= 30 {
+            checkpointNow()
+        }
     }
 
     private func runThroughput() {
-        guard !throughputRunning else { return }
-        throughputRunning = true
+        guard probeTask == nil else { return }
         // Adaptive: probe less data when the last measurement was weak/dead.
         let bytes: Int
         switch lastResult?.downMbps {
@@ -186,20 +259,25 @@ final class RecordingEngine: ObservableObject {
         case .none where lastResultAt != nil: bytes = 400_000
         default: bytes = 1_500_000
         }
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await self.tester.measure(downloadBytes: bytes)
-            self.lastResult = result
-            self.lastResultAt = Date()
-            self.throughputRunning = false
+        let tester = self.tester
+        probing = true
+        probeTask = Task { [weak self] in
+            let result = await tester.measure(downloadBytes: bytes)
+            guard let self, !Task.isCancelled, self.isRecording else { return }
+            if let result {
+                self.lastResult = result
+                self.lastResultAt = Date()
+            }
+            self.probeTask = nil
+            self.probing = false
         }
     }
 
     // MARK: - Display helpers
 
     var elapsedString: String {
-        let m = elapsed / 60, s = elapsed % 60
-        return String(format: "%02d:%02d", m, s)
+        let h = elapsed / 3600, m = (elapsed % 3600) / 60, s = elapsed % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 
     var lastLatString: String {
@@ -213,10 +291,20 @@ final class RecordingEngine: ObservableObject {
     }
     var speedString: String {
         guard let s = location.location?.speed, s >= 0 else { return settings.speedString(mph: 0) }
-        return settings.speedString(mph: s * 2.2369362920544)
+        return settings.speedString(mph: s * AppSettings.mphPerMetersPerSecond)
     }
     var latencyString: String {
-        guard let l = lastResult?.latencyMs else { return currentRat == .none ? "timeout" : "—" }
+        if !throughputActive { return "off" }
+        guard let l = lastResult?.latencyMs else {
+            return lastResultAt == nil ? (probing ? "testing…" : "—") : "timeout"
+        }
         return String(format: "%.0f ms", l)
+    }
+    var downloadString: String {
+        if !throughputActive { return "off" }
+        guard let d = lastResult?.downMbps else {
+            return lastResultAt == nil ? (probing ? "testing…" : "—") : "no data"
+        }
+        return d >= 10 ? String(format: "%.0f Mbps", d) : String(format: "%.1f Mbps", d)
     }
 }

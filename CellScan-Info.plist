@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Keys that Xcode's generated Info.plist (GENERATE_INFOPLIST_FILE) can't express
+  via INFOPLIST_KEY_* build settings. Xcode merges this file with the generated
+  keys (usage descriptions, launch screen, orientation, ...).
+  Lives outside the synchronized CellScan/ folder so it isn't copied as a resource.
+-->
+<dict>
+	<!-- Keep receiving GPS fixes with the screen off while a pass is recording. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+	<!-- Expose Documents (passes.json + any recovery backups) in the Files app. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+</dict>
+</plist>

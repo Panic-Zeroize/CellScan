@@ -255,7 +255,7 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "CellScan records your GPS track and cellular coverage while you drive.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = location;
+				INFOPLIST_FILE = "CellScan-Info.plist";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -287,7 +287,7 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "CellScan records your GPS track and cellular coverage while you drive.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = location;
+				INFOPLIST_FILE = "CellScan-Info.plist";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
