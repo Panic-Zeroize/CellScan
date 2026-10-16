@@ -12,6 +12,9 @@ final class ArchiveTests: XCTestCase {
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: dir)
+        // Linux XCTest keeps every test-case instance alive; drop what we own.
+        dir = nil
+        archive = nil
     }
 
     private func files() -> [String] {

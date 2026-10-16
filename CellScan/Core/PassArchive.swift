@@ -63,7 +63,7 @@ struct PassArchive {
 
         let data: Data
         do {
-            data = try Data(contentsOf: passesURL)
+            data = try Self.read(passesURL)
         } catch {
             let backup = preserve(passesURL, tag: "unreadable")
             return LoadResult(passes: [],
@@ -118,7 +118,7 @@ struct PassArchive {
     func takeCheckpoint() -> Pass? {
         let fm = FileManager.default
         guard fm.fileExists(atPath: checkpointURL.path) else { return nil }
-        guard let data = try? Data(contentsOf: checkpointURL),
+        guard let data = try? Self.read(checkpointURL),
               let pass = try? Self.makeDecoder().decode(Pass.self, from: data) else {
             _ = preserve(checkpointURL, tag: "corrupt")
             clearCheckpoint()
@@ -135,13 +135,21 @@ struct PassArchive {
     /// Removes the checkpoint only if it belongs to the given pass, so clearing a
     /// stale recovered pass can never delete a newer, live recording's checkpoint.
     func clearCheckpoint(ifPassID id: UUID) {
-        guard let data = try? Data(contentsOf: checkpointURL),
+        guard let data = try? Self.read(checkpointURL),
               let pass = try? Self.makeDecoder().decode(Pass.self, from: data),
               pass.id == id else { return }
         clearCheckpoint()
     }
 
     // MARK: - Helpers
+
+    /// Reads a file, short-circuiting zero-length files (Foundation's file reader
+    /// leaks its scratch buffer for empty files on some platforms).
+    private static func read(_ url: URL) throws -> Data {
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        if let size = attrs[.size] as? NSNumber, size.intValue == 0 { return Data() }
+        return try Data(contentsOf: url)
+    }
 
     private func write(_ data: Data, to url: URL) throws {
         do {

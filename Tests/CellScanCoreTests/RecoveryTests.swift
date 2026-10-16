@@ -11,7 +11,12 @@ final class RecoveryTests: XCTestCase {
         archive = PassArchive(directory: dir)
     }
 
-    override func tearDown() { try? FileManager.default.removeItem(at: dir) }
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        // Linux XCTest keeps every test-case instance alive; drop what we own.
+        dir = nil
+        archive = nil
+    }
 
     func testTargetedClearOnlyRemovesMatchingCheckpoint() throws {
         let stale = Fixtures.drive(samples: 5, seed: 1)
